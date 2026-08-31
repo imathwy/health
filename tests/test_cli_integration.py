@@ -82,6 +82,7 @@ class CliIntegrationTests(unittest.TestCase):
                 ["render", "2026-01-02"],
                 ["verify", "2026-01-02"],
                 ["summary", "--days", "7", "--end", "2026-01-02"],
+                ["dashboard"],
             ):
                 completed = subprocess.run(
                     [str(PROJECT_ROOT / "bin" / "diet"), *command],
@@ -94,6 +95,7 @@ class CliIntegrationTests(unittest.TestCase):
                 self.assertEqual(completed.returncode, 0, completed.stderr + completed.stdout)
 
             self.assertTrue((root / "runtime" / "state" / "healthlog.sqlite3").is_file())
+            self.assertTrue((root / "runtime" / "index.html").is_file())
             self.assertTrue((root / "runtime" / "daily" / "20260102" / "index.html").is_file())
             self.assertTrue((root / "runtime" / "reports" / "nutrition" / "20260102-7d.html").is_file())
 

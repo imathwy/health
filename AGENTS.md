@@ -11,6 +11,9 @@ This repository separates reusable source from private health data. Never transm
   SQLite, and caches belong here.
 - Developer build output: `build/`. Signed Shortcuts and build/test scratch files
   belong here and are never health-record inputs.
+- Local web display: `runtime/index.html` may show private reports. Never serve
+  the repository root or expose the portal beyond loopback without explicit
+  authorization.
 - Do not create root-level compatibility aliases such as `daily`; each path has
   one owner.
 - Before committing, run `python3 scripts/check_privacy.py --staged`. Fix the cause rather than bypassing the hook.
@@ -30,7 +33,9 @@ When the user asks to analyze food for today, yesterday, or a date:
 7. Write schema-v2 `analysis.json` with range estimates for calories, protein, carbohydrate, fat, fiber, and sodium. Every item also records `evidence.portion_method` and `evidence.nutrition_source`; optional nutrients are omitted when unknown rather than filled with zero.
 8. Prefer a visible package label, then a verified matching single-food database record, then a wide recipe estimate. Do not map a mixed cafeteria plate to one USDA item or invent a source after estimating from general knowledge.
 9. Run `./bin/diet render YYYY-MM-DD` and `./bin/diet verify YYYY-MM-DD`. Rendering also syncs the private SQLite index. Fix errors until verification passes.
-10. Return links to the dated Markdown and static HTML reports plus the material uncertainty.
+10. Run `./bin/diet dashboard` when the unified portal is missing or stale.
+11. Return links to `runtime/index.html`, the dated Markdown and static HTML,
+    plus the material uncertainty.
 
 Use the targets and health guardrails from the ignored local profile. Do not infer diagnoses or add supplements from one day of photos. Never delete or alter original media. Do not use `--reset-analysis` on meaningful work unless it has first been preserved. Use `--skip-export` only when the user explicitly wants existing files analyzed or when testing downstream code.
 

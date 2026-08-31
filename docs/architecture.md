@@ -13,9 +13,10 @@ The repository has five explicit boundaries:
    and the human-reviewed `analysis.json`. `data/medical/` and
    `data/supplements/` hold the other user-owned health records. Back up this
    layer.
-4. **Rebuildable private runtime** — `runtime/` contains manifests, previews,
-   rendered daily reports, longitudinal reports, SQLite indexes, and the USDA
-   cache. It can be removed and recreated from `data/` plus the local profile.
+4. **Rebuildable private runtime** — `runtime/` contains the unified static
+   portal, manifests, previews, rendered daily reports, longitudinal reports,
+   SQLite indexes, and the USDA cache. It can be removed and recreated from
+   `data/` plus the local profile.
 5. **Developer build output** — `build/` contains signed Shortcut artifacts and
    temporary test/build output. It is never a data source.
 
@@ -30,6 +31,8 @@ flowchart LR
     F --> G[runtime/daily: Markdown and HTML]
     F --> H[runtime/state: SQLite index]
     H --> I[runtime/reports: 7/30-day summaries]
+    G --> J[runtime/index.html: local portal]
+    I --> J
 ```
 
 The two uncertainties in each item stay separate: `portion_method` explains how

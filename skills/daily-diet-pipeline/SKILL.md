@@ -28,7 +28,9 @@ Use the repository as the executable source of truth. Find its root by locating 
 6. Write schema-v2 `analysis.json`. Every item must include core nutrient ranges, confidence, and `evidence`. Load `references/analysis-schema.md` when authoring or repairing the file.
 7. Run `./bin/diet render DATE`. This validates the analysis, writes Markdown and standalone HTML, and transactionally syncs the private SQLite index.
 8. Run `./bin/diet verify DATE`. Fix errors until it prints `VERIFY=passed`.
-9. Return links to the dated Markdown and HTML, the energy/protein intervals, and the largest uncertainty.
+9. Run `./bin/diet dashboard` if the unified local portal is missing or stale.
+10. Return links to `runtime/index.html`, the dated Markdown and HTML, the
+    energy/protein intervals, and the largest uncertainty.
 
 ## Interpret photo evidence
 
@@ -116,4 +118,7 @@ The report must:
 
 ## Completion checks
 
-The job is complete only when every asset was reviewed, duplicates were not double counted, each food has source-aware range estimates, both daily reports exist, SQLite matches the analysis hash, and `./bin/diet verify DATE` prints `VERIFY=passed`.
+The job is complete only when every asset was reviewed, duplicates were not
+double counted, each food has source-aware range estimates, both daily reports
+and the unified portal exist, SQLite matches the analysis hash, and
+`./bin/diet verify DATE` prints `VERIFY=passed`.

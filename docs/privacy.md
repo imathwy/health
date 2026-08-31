@@ -18,6 +18,11 @@
 
 `.gitignore` prevents ordinary staging. `.githooks/pre-commit` also inspects the staged Git snapshot, rejects private paths and binary media, limits file size, and searches for home-directory paths and common credential forms. This second layer catches accidental `git add -f` usage.
 
+`runtime/index.html` is a local display surface for private health reports. Open
+it as a local file, or serve a curated display-only directory on
+`127.0.0.1`. Do not use the repository root as an HTTP document root and do not
+publish the portal without a separate, explicit sharing decision.
+
 If private data is ever committed, removing it in a later commit is insufficient because it remains in history. Stop before pushing, remove it from history with an appropriate history-rewrite tool, rotate any exposed credentials, and verify a fresh clone before publishing.
 
 ## Optional external nutrition lookup

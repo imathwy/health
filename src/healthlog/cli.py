@@ -1316,6 +1316,233 @@ body{{margin:0;background:#f4f2eb;color:#18211b;font:16px/1.6 -apple-system,Blin
     atomic_write_text(daily_output_root / "index.html", page)
 
 
+def relative_href(source_dir: Path, target: Path) -> str:
+    return Path(os.path.relpath(target, source_dir)).as_posix()
+
+
+def newest_report(report_dir: Path, suffix: str) -> Path | None:
+    candidates = sorted(report_dir.glob(f"*-{suffix}.html"), reverse=True)
+    return candidates[0] if candidates else None
+
+
+def update_dashboard(profile: dict[str, Any]) -> Path:
+    paths = paths_for(date.today(), profile)
+    local_runtime_root = paths["runtime_root"]
+    local_runtime_root.mkdir(parents=True, exist_ok=True)
+    dashboard_path = local_runtime_root / "index.html"
+
+    daily_dirs = sorted(
+        (
+            path
+            for path in paths["daily_output_root"].glob("[0-9]" * 8)
+            if path.is_dir() and (path / REPORT_HTML_NAME).is_file()
+        ),
+        reverse=True,
+    )
+    latest_daily_paths = (
+        paths_for(datetime.strptime(daily_dirs[0].name, "%Y%m%d").date(), profile)
+        if daily_dirs
+        else None
+    )
+    latest_entry = rendered_entry(latest_daily_paths) if latest_daily_paths else None
+
+    report_dir = nutrition_reports_dir(profile)
+    supplement_report = ROOT / "data" / "supplements" / "index.html"
+    daily_index = paths["daily_output_root"] / "index.html"
+    seven_day = newest_report(report_dir, "7d")
+    thirty_day = newest_report(report_dir, "30d")
+
+    views: list[dict[str, str]] = []
+
+    def add_view(
+        key: str,
+        group: str,
+        label: str,
+        title: str,
+        description: str,
+        target: Path | None,
+    ) -> None:
+        if target is None or not target.is_file():
+            return
+        views.append(
+            {
+                "key": key,
+                "group": group,
+                "label": label,
+                "title": title,
+                "description": description,
+                "href": relative_href(local_runtime_root, target),
+            }
+        )
+
+    add_view(
+        "health",
+        "健康计划",
+        "健康与补剂",
+        "健康建议与补剂方案",
+        "查看营养成分表、补剂取舍、使用时间和风险提示。",
+        supplement_report,
+    )
+    add_view(
+        "latest",
+        "每日饮食",
+        "最近一天",
+        f"{latest_entry['date']} 饮食分析" if latest_entry else "最近一天饮食分析",
+        "逐餐估算、目标比较、照片证据与不确定性。",
+        latest_daily_paths["report_html"] if latest_daily_paths else None,
+    )
+    add_view(
+        "daily",
+        "每日饮食",
+        "全部日期",
+        "每日饮食索引",
+        "按日期进入已完成的饮食报告。",
+        daily_index,
+    )
+    add_view(
+        "week",
+        "长期趋势",
+        "7 天",
+        "7 天营养汇总",
+        "查看记录覆盖、区间均值与短期趋势证据。",
+        seven_day,
+    )
+    add_view(
+        "month",
+        "长期趋势",
+        "30 天",
+        "30 天营养汇总",
+        "查看更长窗口的摄入区间与数据缺口。",
+        thirty_day,
+    )
+
+    nav_groups: list[str] = []
+    for group in dict.fromkeys(view["group"] for view in views):
+        links = "".join(
+            (
+                f'<a class="nav-link" href="{html.escape(view["href"], quote=True)}" '
+                f'data-view="{html.escape(view["key"], quote=True)}">'
+                f'<span>{html.escape(view["label"])}</span><b aria-hidden="true">›</b></a>'
+            )
+            for view in views
+            if view["group"] == group
+        )
+        nav_groups.append(
+            f'<section class="nav-group"><p>{html.escape(group)}</p>{links}</section>'
+        )
+
+    latest_date = latest_entry["date"] if latest_entry else "尚无记录"
+    latest_kcal = latest_entry["kcal"] if latest_entry else "—"
+    latest_protein = latest_entry["protein"] if latest_entry else "—"
+    daily_count = len(daily_dirs)
+    view_payload = json.dumps(
+        {view["key"]: view for view in views},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).replace("<", "\\u003c")
+    generated = datetime.now().astimezone().isoformat(timespec="seconds")
+
+    page = f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Local HealthLog · 健康总览</title>
+  <style>
+    :root {{ color-scheme:light; --ink:#17221b; --muted:#68736c; --paper:#f2f0e9; --panel:#fffdf8; --line:#dce2da; --green:#185b43; --green2:#287a5c; --soft:#e6f0e9; --amber:#9a6414; }}
+    * {{ box-sizing:border-box }} html {{ scroll-behavior:smooth }} body {{ margin:0; background:var(--paper); color:var(--ink); font:15px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",sans-serif }}
+    a {{ color:inherit }} .shell {{ min-height:100vh; display:grid; grid-template-columns:280px minmax(0,1fr) }}
+    aside {{ position:sticky; top:0; height:100vh; overflow:auto; padding:28px 22px; color:#ecf5ef; background:linear-gradient(165deg,#123d2f,#1d6048 62%,#174936) }}
+    .brand {{ display:flex; align-items:center; gap:12px; margin-bottom:28px }} .mark {{ display:grid; place-items:center; width:42px; height:42px; border-radius:14px; background:#f2c76e; color:#173d30; font-weight:900 }}
+    .brand strong {{ display:block; font-size:17px }} .brand span {{ display:block; color:#bed6c8; font-size:12px }}
+    .nav-home,.nav-link {{ display:flex; align-items:center; justify-content:space-between; gap:12px; padding:11px 13px; border-radius:12px; text-decoration:none; transition:.18s ease }}
+    .nav-home {{ margin-bottom:18px; background:rgba(255,255,255,.08) }} .nav-group {{ margin:18px 0 }} .nav-group>p {{ margin:0 0 6px 12px; color:#a9c9b8; font-size:11px; font-weight:800; letter-spacing:.12em; text-transform:uppercase }}
+    .nav-link {{ color:#dcebe2 }} .nav-link:hover,.nav-link.active,.nav-home.active {{ background:#f4f0df; color:#173d30; transform:translateX(2px) }} .nav-link b {{ font-size:20px }}
+    .privacy {{ margin-top:26px; padding:13px; border:1px solid rgba(255,255,255,.14); border-radius:14px; color:#bfd5c8; font-size:12px }}
+    main {{ min-width:0; padding:34px clamp(18px,4vw,56px) 60px }} .topbar {{ display:flex; justify-content:space-between; gap:18px; align-items:flex-start; margin-bottom:24px }}
+    .eyebrow {{ margin:0 0 5px; color:var(--green2); font-size:12px; font-weight:850; letter-spacing:.13em; text-transform:uppercase }} h1 {{ margin:0; font-size:clamp(34px,5vw,62px); line-height:1.05; letter-spacing:-.045em }}
+    .status {{ display:inline-flex; align-items:center; gap:7px; padding:8px 11px; border:1px solid #cbd9cf; border-radius:999px; background:#edf5ef; color:var(--green); white-space:nowrap }} .status:before {{ content:""; width:8px; height:8px; border-radius:50%; background:#37a36f }}
+    .hero {{ padding:clamp(24px,4vw,42px); border-radius:28px; background:linear-gradient(135deg,#fffdf8,#edf4ed); border:1px solid var(--line); box-shadow:0 18px 50px rgba(32,55,43,.07) }} .hero p {{ max-width:760px; color:var(--muted); font-size:17px }}
+    .metrics {{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-top:26px }} .metric {{ padding:18px; border:1px solid var(--line); border-radius:17px; background:rgba(255,255,255,.72) }} .metric span {{ color:var(--muted); font-size:12px }} .metric strong {{ display:block; margin-top:4px; font-size:21px }}
+    .layers {{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:22px }} .layer {{ padding:21px; border:1px solid var(--line); border-radius:19px; background:var(--panel) }} .layer i {{ display:grid; place-items:center; width:34px; height:34px; border-radius:11px; background:var(--soft); color:var(--green); font-style:normal; font-weight:900 }} .layer h2 {{ margin:13px 0 4px; font-size:18px }} .layer p {{ margin:0; color:var(--muted) }}
+    #viewer[hidden],#overview[hidden] {{ display:none }} .viewer-head {{ display:flex; justify-content:space-between; gap:20px; align-items:flex-end; margin-bottom:15px }} .viewer-head h2 {{ margin:0; font-size:30px }} .viewer-head p {{ margin:5px 0 0; color:var(--muted) }} .open-link {{ padding:9px 13px; border:1px solid var(--line); border-radius:12px; background:var(--panel); text-decoration:none; white-space:nowrap }}
+    iframe {{ display:block; width:100%; min-height:calc(100vh - 165px); border:1px solid var(--line); border-radius:22px; background:white; box-shadow:0 14px 40px rgba(28,48,38,.06) }} footer {{ margin-top:18px; color:var(--muted); font-size:12px }}
+    @media(max-width:980px) {{ .shell {{ grid-template-columns:1fr }} aside {{ position:relative; height:auto; padding:18px }} .brand,.privacy {{ display:none }} nav {{ display:flex; gap:8px; overflow-x:auto; padding-bottom:4px }} .nav-home,.nav-group {{ flex:0 0 auto; margin:0 }} .nav-group {{ display:flex; gap:6px }} .nav-group>p {{ display:none }} .nav-link,.nav-home {{ white-space:nowrap; background:rgba(255,255,255,.08) }} .nav-link b {{ display:none }} main {{ padding-top:24px }} }}
+    @media(max-width:700px) {{ .topbar,.viewer-head {{ align-items:flex-start; flex-direction:column }} .metrics,.layers {{ grid-template-columns:1fr 1fr }} iframe {{ min-height:72vh }} }}
+    @media(max-width:470px) {{ .metrics,.layers {{ grid-template-columns:1fr }} h1 {{ font-size:38px }} }}
+  </style>
+</head>
+<body>
+<div class="shell">
+  <aside>
+    <div class="brand"><div class="mark">H</div><div><strong>Local HealthLog</strong><span>个人健康工作台</span></div></div>
+    <nav aria-label="健康报告导航">
+      <a class="nav-home active" href="#overview" data-view="overview"><span>总览</span><b aria-hidden="true">⌂</b></a>
+      {''.join(nav_groups)}
+    </nav>
+    <div class="privacy">仅在本机读取。原始记录位于 data，当前页面和报告位于可重建的 runtime。</div>
+  </aside>
+  <main>
+    <div class="topbar"><div><p class="eyebrow">Personal health workspace</p><h1>健康总览</h1></div><span class="status">本地运行</span></div>
+    <section id="overview">
+      <div class="hero">
+        <p class="eyebrow">Latest verified record</p>
+        <h1>{html.escape(latest_date)}</h1>
+        <p>从 Apple Photos 导出、逐图核对、区间估算到静态报告均保留证据来源。切换左侧栏目查看细节；页面不会加载外部脚本、字体或图片。</p>
+        <div class="metrics">
+          <div class="metric"><span>已完成日期</span><strong>{daily_count} 天</strong></div>
+          <div class="metric"><span>最近热量</span><strong>{html.escape(latest_kcal)}</strong></div>
+          <div class="metric"><span>最近蛋白质</span><strong>{html.escape(latest_protein)}</strong></div>
+          <div class="metric"><span>可用报告</span><strong>{len(views)} 个</strong></div>
+        </div>
+      </div>
+      <div class="layers">
+        <article class="layer"><i>1</i><h2>健康计划</h2><p>个人目标、补剂营养表、保留或停用建议及使用方式。</p></article>
+        <article class="layer"><i>2</i><h2>每日证据</h2><p>原始照片留在 data；逐餐估算与图片核对在 runtime 展示。</p></article>
+        <article class="layer"><i>3</i><h2>长期趋势</h2><p>按有记录日期计算 7/30 天区间，不把缺失日当作零。</p></article>
+      </div>
+      <footer>更新于 {html.escape(generated)} · 个人记录与建议不替代医疗诊断。</footer>
+    </section>
+    <section id="viewer" hidden>
+      <div class="viewer-head"><div><p class="eyebrow" id="view-group"></p><h2 id="view-title"></h2><p id="view-description"></p></div><a class="open-link" id="open-view" href="#">单独打开 ↗</a></div>
+      <iframe id="report-frame" title="健康报告"></iframe>
+    </section>
+  </main>
+</div>
+<script>
+  const views={view_payload};
+  const overview=document.getElementById("overview");
+  const viewer=document.getElementById("viewer");
+  const frame=document.getElementById("report-frame");
+  const links=[...document.querySelectorAll("[data-view]")];
+  function selectView(key){{
+    links.forEach(link=>link.classList.toggle("active",link.dataset.view===key));
+    if(key==="overview"||!views[key]){{
+      overview.hidden=false; viewer.hidden=true; frame.removeAttribute("src");
+      document.title="Local HealthLog · 健康总览";
+      if(location.hash!=="#overview") history.replaceState(null,"","#overview");
+      return;
+    }}
+    const view=views[key]; overview.hidden=true; viewer.hidden=false;
+    document.getElementById("view-group").textContent=view.group;
+    document.getElementById("view-title").textContent=view.title;
+    document.getElementById("view-description").textContent=view.description;
+    const open=document.getElementById("open-view"); open.href=view.href;
+    if(frame.getAttribute("src")!==view.href) frame.src=view.href;
+    document.title=view.title+" · Local HealthLog";
+    if(location.hash!=="#"+key) history.replaceState(null,"","#"+key);
+  }}
+  links.forEach(link=>link.addEventListener("click",event=>{{event.preventDefault();selectView(link.dataset.view)}}));
+  window.addEventListener("hashchange",()=>selectView(location.hash.slice(1)||"overview"));
+  selectView(location.hash.slice(1)||"overview");
+</script>
+</body>
+</html>
+"""
+    atomic_write_text(dashboard_path, page)
+    return dashboard_path
+
+
 def load_analysis_bundle(
     target: date, profile: dict[str, Any]
 ) -> tuple[dict[str, Path], dict[str, Any], dict[str, Any]]:
@@ -1372,6 +1599,7 @@ def render(args: argparse.Namespace) -> int:
     atomic_write_text(paths["report_md"], markdown)
     atomic_write_text(paths["report_html"], page)
     update_daily_indexes(profile)
+    dashboard_path = update_dashboard(profile)
     db_path = sync_analysis_to_store(
         profile=profile,
         paths=paths,
@@ -1384,6 +1612,7 @@ def render(args: argparse.Namespace) -> int:
     print(f"DATE={target.isoformat()}")
     print(f"REPORT_MD={paths['report_md']}")
     print(f"REPORT_HTML={paths['report_html']}")
+    print(f"DASHBOARD={dashboard_path}")
     print(f"DATABASE={db_path}")
     print("DATABASE_STATUS=synced")
     print(f"TOTAL_KCAL={display_range(totals['kcal'], 'kcal')}")
@@ -1427,6 +1656,7 @@ def verify(args: argparse.Namespace) -> int:
     for index_path in (
         paths["daily_output_root"] / "README.md",
         paths["daily_output_root"] / "index.html",
+        paths["runtime_root"] / "index.html",
     ):
         if not index_path.exists() or index_path.stat().st_size == 0:
             errors.append(f"每日索引缺失：{index_path}")
@@ -1461,6 +1691,7 @@ def verify(args: argparse.Namespace) -> int:
     for html_path in (
         paths["report_html"],
         paths["daily_output_root"] / "index.html",
+        paths["runtime_root"] / "index.html",
     ):
         if not html_path.exists() or html_path.stat().st_size == 0:
             continue
@@ -1488,6 +1719,7 @@ def verify(args: argparse.Namespace) -> int:
     print(f"PREVIEWS={manifest.get('preview_count', 0)}")
     print(f"REPORT_MD={paths['report_md']}")
     print(f"REPORT_HTML={paths['report_html']}")
+    print(f"DASHBOARD={paths['runtime_root'] / 'index.html'}")
     print(f"DATABASE={db_path}")
     for warning in sorted(set(warnings)):
         print(f"WARNING={warning}")
@@ -1513,6 +1745,9 @@ def status(args: argparse.Namespace) -> int:
     print(f"ANALYSIS={'ready' if paths['analysis'].exists() else 'missing'}")
     print(f"REPORT_MD={'ready' if paths['report_md'].exists() else 'missing'}")
     print(f"REPORT_HTML={'ready' if paths['report_html'].exists() else 'missing'}")
+    print(
+        f"DASHBOARD={'ready' if (paths['runtime_root'] / 'index.html').exists() else 'missing'}"
+    )
     db_path = database_path(profile)
     db_status = "missing"
     if db_path.exists():
@@ -1651,6 +1886,7 @@ def nutrition_summary(args: argparse.Namespace) -> int:
     atomic_write_text(json_path, summary_json_text(result))
     atomic_write_text(md_path, render_summary_markdown(result))
     atomic_write_text(html_path, render_summary_html(result))
+    dashboard_path = update_dashboard(profile)
     html_errors, html_warnings, _ = audit_static_html(html_path)
     if html_errors:
         raise PipelineError("汇总 HTML 未通过校验：\n- " + "\n- ".join(html_errors))
@@ -1662,6 +1898,7 @@ def nutrition_summary(args: argparse.Namespace) -> int:
             "json": str(json_path),
             "markdown": str(md_path),
             "html": str(html_path),
+            "dashboard": str(dashboard_path),
         },
     }
     if args.agent:
@@ -1679,8 +1916,22 @@ def nutrition_summary(args: argparse.Namespace) -> int:
         print(f"REPORT_JSON={json_path}")
         print(f"REPORT_MD={md_path}")
         print(f"REPORT_HTML={html_path}")
+        print(f"DASHBOARD={dashboard_path}")
         for warning in html_warnings:
             print(f"WARNING={warning}")
+    return 0
+
+
+def dashboard_command(_: argparse.Namespace) -> int:
+    profile = load_profile()
+    dashboard_path = update_dashboard(profile)
+    errors, warnings, _ = audit_static_html(dashboard_path)
+    if errors:
+        raise PipelineError("健康门户未通过校验：\n- " + "\n- ".join(errors))
+    print(f"DASHBOARD={dashboard_path}")
+    print("DASHBOARD_STATUS=ready")
+    for warning in warnings:
+        print(f"WARNING={warning}")
     return 0
 
 
@@ -1996,6 +2247,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     summary_parser.set_defaults(func=nutrition_summary)
 
+    dashboard_parser = subparsers.add_parser(
+        "dashboard", help="重建并校验本地静态健康门户"
+    )
+    dashboard_parser.set_defaults(func=dashboard_command)
+
     fdc_search_parser = subparsers.add_parser(
         "fdc-search", help="显式查询 USDA FoodData Central 食物数据"
     )
@@ -2034,6 +2290,7 @@ def main(argv: list[str] | None = None) -> int:
         "db-status",
         "rebuild-db",
         "summary",
+        "dashboard",
         "fdc-search",
         "fdc-food",
         "-h",

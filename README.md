@@ -1,6 +1,6 @@
 # Local HealthLog
 
-Local HealthLog 是一套 macOS 本地优先的饮食记录流水线：Apple Shortcut 按日期导出照片，Codex 检查全部图片并生成带不确定区间和来源记录的 `analysis.json`，随后产出静态 Markdown/HTML、同步本地 SQLite，并生成 7/30 天汇总。
+Local HealthLog 是一套 macOS 本地优先的饮食记录流水线：Apple Shortcut 按日期导出照片，Codex 检查全部图片并生成带不确定区间和来源记录的 `analysis.json`，随后产出静态 Markdown/HTML、同步本地 SQLite，并通过统一健康门户切换补剂、每日饮食和 7/30 天汇总。
 
 ```mermaid
 flowchart LR
@@ -55,9 +55,12 @@ diet prepare yesterday
 diet render yesterday
 diet verify yesterday
 diet status yesterday
+diet dashboard
 ```
 
-`diet yesterday` 是 `diet prepare yesterday` 的缩写。Shortcut 只能直接写入 `data/daily/YYYYMMDD/`；CLI 会拒绝根目录别名或符号链接返回的路径。`render` 同时完成每日 Markdown/HTML 和 SQLite 同步；`verify` 会检查原图哈希、预览、schema、静态链接、报告和数据库哈希。
+`diet yesterday` 是 `diet prepare yesterday` 的缩写。Shortcut 只能直接写入 `data/daily/YYYYMMDD/`；CLI 会拒绝根目录别名或符号链接返回的路径。`render` 同时完成每日 Markdown/HTML、统一门户和 SQLite 同步；`verify` 会检查原图哈希、预览、schema、静态链接、报告、门户和数据库哈希。
+
+本地入口是 `runtime/index.html`。它按“总览 → 健康计划 / 每日饮食 / 长期趋势 → 详细报告”分层，并在一个页面内切换健康与补剂、最近一天、全部日期、7 天和 30 天报告。页面不加载外部脚本、字体或图片；“单独打开”可脱离门户查看当前报告。
 
 Schema v2 为每个食物条目分开记录：
 
@@ -117,6 +120,7 @@ diet db-status
 │   ├── medical/
 │   └── supplements/
 ├── runtime/                     # 可删除重建的私有产物、忽略
+│   ├── index.html               # 统一静态健康门户
 │   ├── daily/YYYYMMDD/          # manifest、预览、每日 Markdown/HTML
 │   ├── reports/nutrition/       # 7/30 天汇总
 │   └── state/healthlog.sqlite3  # SQLite 索引与 USDA 缓存

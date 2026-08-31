@@ -1,0 +1,4 @@
+#!/bin/zsh
+set -euo pipefail
+project_root=$(git rev-parse --show-toplevel)
+exec /usr/bin/env python3 "$project_root/scripts/check_privacy.py" --staged

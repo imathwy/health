@@ -1,0 +1,36 @@
+# Private local profile
+/config/health_profile.json
+/config/*.local.json
+/.privacy.local
+
+# Private health data and generated reports
+/data/*
+!/data/README.md
+/daily
+/检查
+/补剂
+
+# Generated Shortcut files and rendering caches
+/build/
+/tmp/
+*.shortcut
+
+# Secrets and local environments
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+
+# Python, test, and editor state
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+**/.DS_Store

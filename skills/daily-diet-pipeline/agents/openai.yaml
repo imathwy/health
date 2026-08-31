@@ -1,0 +1,6 @@
+interface:
+  display_name: "每日饮食照片流水线"
+  short_description: "从 Apple Photos 导出、分析并生成每日饮食报告"
+  default_prompt: "Use $daily-diet-pipeline to analyze yesterday’s food photos and generate the verified Markdown and static HTML reports."
+policy:
+  allow_implicit_invocation: true

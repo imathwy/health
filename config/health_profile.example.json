@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "profile": {
+    "label": "local-user",
+    "age_years": null,
+    "sex": "unspecified",
+    "height_cm": null,
+    "weight_kg": null,
+    "goals": ["maintain"],
+    "activity": {
+      "work_pattern": "",
+      "strength_sessions_per_week": "",
+      "tennis_hours_per_week": 0,
+      "swimming_hours_per_week": 0
+    }
+  },
+  "targets": {
+    "energy_kcal": {
+      "unknown": [2000, 2400],
+      "rest": [1900, 2300],
+      "strength": [2100, 2500],
+      "swim": [2100, 2500],
+      "tennis": [2200, 2700],
+      "mixed": [2300, 2800]
+    },
+    "protein_g": [90, 130],
+    "carbohydrate_g": {
+      "unknown": [220, 320],
+      "rest": [200, 280],
+      "strength": [240, 340],
+      "swim": [240, 340],
+      "tennis": [280, 380],
+      "mixed": [300, 420]
+    },
+    "fat_g": [55, 80],
+    "fiber_g": [25, 35],
+    "sodium_mg_max": 2000,
+    "water_l_base": 1.5
+  },
+  "diet_context": {
+    "food_photo_means_consumed": true,
+    "photo_logging_convention": "A dated food or drink photo means some amount was consumed; it does not prove the whole visible portion was eaten, and repeated angles count once.",
+    "usual_breakfast": "",
+    "usual_lunch_dinner": "",
+    "usual_snacks": "",
+    "oily_fish_frequency": "",
+    "milk_whey_trial": ""
+  },
+  "health_context": {
+    "digestive": "",
+    "skin": "",
+    "sleep": "",
+    "caffeine": "",
+    "supplement_guardrails": [
+      "Do not infer a deficiency or add a supplement from one day of food photos."
+    ]
+  },
+  "pipeline": {
+    "shortcut_name": "导出每日照片 CLI",
+    "daily_directory": "data/daily",
+    "report_language": "zh-CN"
+  }
+}

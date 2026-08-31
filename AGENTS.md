@@ -21,6 +21,21 @@ This repository separates reusable source from private health data. Never transm
   one owner.
 - Before committing, run `python3 scripts/check_privacy.py --staged`. Fix the cause rather than bypassing the hook.
 
+## Source ownership
+
+- `cli.py` only parses arguments, selects a command, and maps `PipelineError` to
+  an exit code. Put workflow behavior in `commands.py`.
+- `commands.py` orchestrates use cases. It may compose domain code and adapters,
+  but adapters must not import it.
+- `analysis.py`, `nutrition.py`, and `summary.py` are the domain layer. They must
+  not import CLI, filesystem, media, presentation, network, or SQLite adapters.
+- `workspace.py`, `media.py`, `presentation.py`, `store.py`, and `fdc.py` own
+  configuration/filesystem, Photos/preview, static display, SQLite, and USDA
+  boundaries respectively.
+- Preserve these import rules in `tests/test_boundaries.py`. Prefer a focused
+  module or immutable value object over adding another responsibility to an
+  existing large module.
+
 ## Daily diet workflow
 
 When the user asks to analyze food for today, yesterday, or a date:

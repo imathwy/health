@@ -2,10 +2,9 @@
 
 The repository has six explicit boundaries:
 
-1. **Tracked application** — `src/healthlog/` owns date resolution, Shortcut
-   execution, media manifests, previews, schema validation, source-aware
-   nutrition records, report rendering, SQLite indexing, USDA normalization,
-   summaries, and verification.
+1. **Tracked application** — `src/healthlog/` separates its CLI adapter,
+   application orchestration, nutrition domain, and external adapters. The
+   module map below defines ownership and import direction.
 2. **Platform bridge** — `scripts/build_shortcut.py` creates a clone-specific
    Apple Shortcut. Python does not request Photos access; the Shortcut owns that
    permission and writes directly into `data/daily/`.
@@ -22,6 +21,46 @@ The repository has six explicit boundaries:
    presentation files should be backed up.
 6. **Developer build output** — `build/` contains signed Shortcut artifacts and
    temporary test/build output. It is never a data source.
+
+## Application module boundaries
+
+| Layer | Modules | Ownership |
+|---|---|---|
+| Entry adapter | `cli`, `__main__` | Parse arguments, route commands, translate expected failures to exit codes |
+| Application | `commands` | Orchestrate dated workflows and compose ports/adapters |
+| Domain | `analysis`, `nutrition`, `summary` | Analysis schema, nutrient vocabulary, interval math, validation, target comparison, longitudinal summaries |
+| External adapters | `workspace`, `media`, `presentation`, `store`, `fdc` | Filesystem/config, Shortcuts and previews, Markdown/HTML, SQLite, USDA HTTP |
+| Foundation | `errors` | Stable application error shared by inward and outward layers |
+
+```mermaid
+flowchart TD
+    CLI[cli / __main__] --> APP[commands]
+    APP --> ANALYSIS[analysis]
+    APP --> SUMMARY[summary]
+    APP --> WORKSPACE[workspace]
+    APP --> MEDIA[media]
+    APP --> PRESENTATION[presentation]
+    APP --> STORE[store]
+    APP --> FDC[fdc]
+    ANALYSIS --> NUTRITION[nutrition]
+    SUMMARY --> NUTRITION
+    STORE --> NUTRITION
+    FDC --> NUTRITION
+    MEDIA --> WORKSPACE
+    PRESENTATION --> ANALYSIS
+    PRESENTATION --> MEDIA
+    PRESENTATION --> WORKSPACE
+    WORKSPACE --> ERRORS[errors]
+    MEDIA --> ERRORS
+    PRESENTATION --> ERRORS
+```
+
+The domain modules have no outward adapter imports. `tests/test_boundaries.py`
+enforces that rule and also checks that private roots do not overlap or escape
+through rendered assets. `WorkspacePaths`, `RenderedEntry`, and `DashboardView`
+replace string-keyed path and view dictionaries where ownership matters. Large
+HTML templates remain cohesive rendering functions because splitting static
+markup into many tiny helpers would obscure rather than improve the boundary.
 
 ```mermaid
 flowchart LR

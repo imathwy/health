@@ -131,7 +131,17 @@ diet db-status
 │   ├── health/                  # 健康与补剂 HTML、网页资产
 │   ├── daily/YYYYMMDD/          # 每日 HTML 与 JPEG 预览
 │   └── nutrition/               # 7/30 天 HTML
-├── src/healthlog/               # 流水线、SQLite、USDA 与汇总代码
+├── src/healthlog/               # 分层应用代码
+│   ├── cli.py                   # 参数解析与退出码
+│   ├── commands.py              # 用例编排
+│   ├── analysis.py              # 分析 schema、验证与目标比较
+│   ├── nutrition.py             # 营养领域词汇与区间聚合
+│   ├── summary.py               # 长期汇总领域逻辑
+│   ├── workspace.py             # 配置、路径边界与原子文件 I/O
+│   ├── media.py                 # Shortcut、媒体清单与预览
+│   ├── presentation.py          # Markdown、HTML 与本地门户
+│   ├── store.py                 # 可重建 SQLite 适配器
+│   └── fdc.py                   # USDA FoodData Central 适配器
 ├── tests/                       # 无个人数据的标准库测试
 ├── scripts/                     # 初始化、Shortcut 构建、隐私检查
 ├── skills/daily-diet-pipeline/  # 可安装 Codex Skill 与渐进式参考
@@ -149,3 +159,7 @@ python3 scripts/check_privacy.py
 Git 只应包含代码、文档、示例配置和 Skill。个人档案、照片、医疗记录、补剂记录、分析、报告、数据库、USDA 缓存、Shortcut 生成物和密钥都保留在本机。`data/` 是需要备份的私有事实层，`runtime/` 是机器运行层，`site/` 是唯一网页展示层，`build/` 是开发生成层；仓库根目录不保留 `daily` 等兼容链接。详见 [隐私边界](docs/privacy.md) 和 [架构](docs/architecture.md)。
 
 本项目从现有营养 Skills 借鉴了接口思想，并独立实现了适合照片证据的来源模型；取舍与许可证见 [上游设计审查](docs/upstream-inspirations.md)。
+
+应用代码遵循单向依赖：`cli → commands → domain/adapters`，领域模块
+`analysis / nutrition / summary` 不反向导入文件系统、媒体、网页、SQLite
+或网络适配器。具体职责和依赖图见 [架构](docs/architecture.md)。

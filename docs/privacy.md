@@ -12,6 +12,7 @@
 
 - `config/health_profile.json`;
 - anything below `data/` except `data/README.md`;
+- anything below `runtime/` except `runtime/README.md`;
 - anything below `build/`;
 - photos, videos, PDFs, analyses, SQLite databases, USDA caches, signed Shortcuts, environment files, or generated reports.
 

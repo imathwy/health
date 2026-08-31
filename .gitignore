@@ -3,9 +3,15 @@
 /config/*.local.json
 /.privacy.local
 
-# Private health data and generated reports
+# Durable private health records
 /data/*
 !/data/README.md
+
+# Rebuildable private runtime output
+/runtime/*
+!/runtime/README.md
+
+# Legacy root-level paths must never be used
 /daily
 /检查
 /补剂

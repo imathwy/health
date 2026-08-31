@@ -1,5 +1,6 @@
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -14,9 +15,8 @@ class CliIntegrationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as raw_root:
             root = Path(raw_root)
             (root / "config").mkdir()
-            day_dir = root / "data" / "daily" / "20260102"
-            pipeline_dir = day_dir / ".diet-pipeline"
-            pipeline_dir.mkdir(parents=True)
+            record_dir = root / "data" / "daily" / "20260102"
+            record_dir.mkdir(parents=True)
             profile = {
                 "schema_version": 1,
                 "targets": {
@@ -29,21 +29,11 @@ class CliIntegrationTests(unittest.TestCase):
                 },
                 "pipeline": {
                     "shortcut_name": "test",
-                    "daily_directory": "data/daily",
-                    "database_path": "data/state/healthlog.sqlite3",
-                    "nutrition_reports_directory": "data/reports/nutrition",
+                    "daily_records_directory": "data/daily",
+                    "runtime_directory": "runtime",
                 },
             }
             (root / "config" / "health_profile.json").write_text(json.dumps(profile))
-            manifest = {
-                "schema_version": 1,
-                "date": "2026-01-02",
-                "asset_count": 0,
-                "preview_count": 0,
-                "assets": [],
-                "shortcut": {"name": "test"},
-            }
-            (pipeline_dir / "manifest.json").write_text(json.dumps(manifest))
             analysis = {
                 "schema_version": 2,
                 "date": "2026-01-02",
@@ -84,10 +74,11 @@ class CliIntegrationTests(unittest.TestCase):
                 "assumptions": [],
                 "overall_confidence": "medium",
             }
-            (day_dir / "analysis.json").write_text(json.dumps(analysis))
+            (record_dir / "analysis.json").write_text(json.dumps(analysis))
             environment = dict(os.environ, HEALTHLOG_ROOT=str(root))
 
             for command in (
+                ["prepare", "2026-01-02", "--skip-export"],
                 ["render", "2026-01-02"],
                 ["verify", "2026-01-02"],
                 ["summary", "--days", "7", "--end", "2026-01-02"],
@@ -102,9 +93,31 @@ class CliIntegrationTests(unittest.TestCase):
                 )
                 self.assertEqual(completed.returncode, 0, completed.stderr + completed.stdout)
 
-            self.assertTrue((root / "data" / "state" / "healthlog.sqlite3").is_file())
-            self.assertTrue((day_dir / "index.html").is_file())
-            self.assertTrue((root / "data" / "reports" / "nutrition" / "20260102-7d.html").is_file())
+            self.assertTrue((root / "runtime" / "state" / "healthlog.sqlite3").is_file())
+            self.assertTrue((root / "runtime" / "daily" / "20260102" / "index.html").is_file())
+            self.assertTrue((root / "runtime" / "reports" / "nutrition" / "20260102-7d.html").is_file())
+
+            shutil.rmtree(root / "runtime")
+            rebuilt = subprocess.run(
+                [str(PROJECT_ROOT / "bin" / "diet"), "rebuild-db"],
+                cwd=PROJECT_ROOT,
+                env=environment,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(rebuilt.returncode, 0, rebuilt.stderr + rebuilt.stdout)
+            self.assertTrue((root / "runtime" / "state" / "healthlog.sqlite3").is_file())
+            self.assertTrue(
+                (
+                    root
+                    / "runtime"
+                    / "daily"
+                    / "20260102"
+                    / "pipeline"
+                    / "manifest.json"
+                ).is_file()
+            )
 
 
 if __name__ == "__main__":

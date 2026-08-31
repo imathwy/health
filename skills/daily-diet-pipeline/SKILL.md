@@ -19,7 +19,10 @@ Use the repository as the executable source of truth. Find its root by locating 
 
 1. Resolve `today`, `yesterday`, or the requested `YYYY-MM-DD` in local time.
 2. Run `./bin/diet prepare DATE`. Use `--skip-export` only when the user explicitly wants existing files analyzed or while testing downstream code.
-3. Read `config/health_profile.json`, the dated `.diet-pipeline/manifest.json`, and `.diet-pipeline/analysis.template.json`.
+3. Read `config/health_profile.json`, the canonical
+   `data/daily/YYYYMMDD/analysis.json`, and the generated
+   `runtime/daily/YYYYMMDD/pipeline/manifest.json` plus
+   `analysis.template.json`.
 4. Inspect every manifest asset through its `preview_path`. If a preview failed, inspect the original with another supported local viewer. Do not sample.
 5. Reconstruct meals from timestamps, before/after pairs, repeated angles, and user statements. Count duplicate views and Live Photo pairs once.
 6. Write schema-v2 `analysis.json`. Every item must include core nutrient ranges, confidence, and `evidence`. Load `references/analysis-schema.md` when authoring or repairing the file.
@@ -104,8 +107,12 @@ The report must:
 - Never delete or alter original exported media.
 - `prepare` preserves an existing `analysis.json`; reconcile `preserved-needs-sync` manually.
 - Do not use `--reset-analysis` on meaningful work without preserving it.
-- SQLite under `data/state/` is derived and rebuildable. `analysis.json` remains the reviewable canonical record.
-- Keep `config/health_profile.json`, `data/`, and `build/` out of Git. Run `python3 scripts/check_privacy.py --staged` before committing repository changes.
+- SQLite under `runtime/state/` is derived and rebuildable. The dated
+  `analysis.json` under `data/daily/` remains the reviewable canonical record.
+- Keep `config/health_profile.json`, private contents of `data/`, `runtime/`, and
+  `build/` out of Git. Never introduce root-level compatibility aliases such as
+  `daily`. Run `python3 scripts/check_privacy.py --staged` before committing
+  repository changes.
 
 ## Completion checks
 

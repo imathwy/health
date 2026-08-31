@@ -5,6 +5,7 @@ project_root=${0:A:h:h}
 install_links=true
 build_shortcut=true
 open_shortcut=false
+signed_shortcut=""
 
 while (( $# )); do
   case "$1" in
@@ -49,9 +50,10 @@ fi
   "$project_root/config" \
   "$project_root/data/daily" \
   "$project_root/data/medical" \
-  "$project_root/data/reports/nutrition" \
-  "$project_root/data/state" \
   "$project_root/data/supplements" \
+  "$project_root/runtime/daily" \
+  "$project_root/runtime/reports/nutrition" \
+  "$project_root/runtime/state" \
   "$project_root/build/shortcuts"
 
 if [[ ! -f "$project_root/config/health_profile.json" ]]; then
@@ -95,10 +97,14 @@ if $install_links; then
 fi
 
 if $build_shortcut; then
-  /usr/bin/env python3 "$project_root/scripts/build_shortcut.py" --sign
+  shortcut_build_output=$(
+    /usr/bin/env python3 "$project_root/scripts/build_shortcut.py" --sign
+  )
+  print -- "$shortcut_build_output"
+  signed_shortcut=${shortcut_build_output##*$'\n'}
   /usr/bin/plutil -lint "$project_root/build/shortcuts/daily_photos_cli.xml"
   if $open_shortcut; then
-    /usr/bin/open "$project_root/build/shortcuts/导出每日照片 CLI.shortcut"
+    /usr/bin/open "$signed_shortcut"
   fi
 fi
 
@@ -107,6 +113,6 @@ fi
 print -- "Setup complete."
 if $build_shortcut && ! $open_shortcut; then
   print -- "Import the Shortcut once with:"
-  print -- "  open '$project_root/build/shortcuts/导出每日照片 CLI.shortcut'"
+  print -- "  open '$signed_shortcut'"
 fi
 print -- "Then edit config/health_profile.json and run: diet yesterday"

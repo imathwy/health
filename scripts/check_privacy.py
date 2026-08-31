@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 ROOT = Path(__file__).resolve().parents[1]
 MAX_PUBLIC_FILE_BYTES = 1_000_000
 ALLOWED_DATA_FILES = {"data/README.md"}
+ALLOWED_RUNTIME_FILES = {"runtime/README.md"}
 FORBIDDEN_EXACT = {
     ".env",
     "config/health_profile.json",
@@ -86,6 +87,11 @@ def audit_path(path: str, payload: bytes) -> list[str]:
         errors.append("private local file")
     if normalized.startswith("data/") and normalized not in ALLOWED_DATA_FILES:
         errors.append("private data directory")
+    if (
+        normalized.startswith("runtime/")
+        and normalized not in ALLOWED_RUNTIME_FILES
+    ):
+        errors.append("private runtime directory")
     if normalized.startswith(FORBIDDEN_PREFIXES):
         errors.append("private or generated directory")
     if suffix in FORBIDDEN_SUFFIXES:

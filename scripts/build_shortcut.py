@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import plistlib
 import shlex
@@ -34,11 +35,10 @@ def parse_args() -> argparse.Namespace:
         help="Health-log repository root (default: inferred from this script)",
     )
     parser.add_argument(
-        "--daily-directory",
-        default="data/daily",
-        help="Photo output directory, relative to --root unless absolute",
+        "--daily-records-directory",
+        help="Durable photo-record directory, relative to --root unless absolute",
     )
-    parser.add_argument("--shortcut-name", default="导出每日照片 CLI")
+    parser.add_argument("--shortcut-name")
     parser.add_argument("--output", type=Path, help="Unsigned XML output path")
     parser.add_argument("--signed-output", type=Path, help="Signed output path")
     parser.add_argument("--sign", action="store_true", help="Sign with shortcuts CLI")
@@ -52,7 +52,30 @@ def parse_args() -> argparse.Namespace:
 
 ARGS = parse_args()
 PROJECT_ROOT = ARGS.root.expanduser().resolve()
-DAILY_ROOT = (PROJECT_ROOT / ARGS.daily_directory).expanduser().resolve()
+LOCAL_PROFILE_PATH = PROJECT_ROOT / "config" / "health_profile.json"
+pipeline_settings: dict[str, object] = {}
+if LOCAL_PROFILE_PATH.exists():
+    profile = json.loads(LOCAL_PROFILE_PATH.read_text(encoding="utf-8"))
+    pipeline_settings = dict(profile.get("pipeline", {}))
+
+SHORTCUT_NAME = ARGS.shortcut_name or str(
+    pipeline_settings.get("shortcut_name", "HealthLog 导出每日照片")
+)
+records_value = ARGS.daily_records_directory or str(
+    pipeline_settings.get("daily_records_directory", "data/daily")
+)
+records_candidate = Path(records_value).expanduser()
+RECORDS_ROOT = (
+    records_candidate.resolve()
+    if records_candidate.is_absolute()
+    else (PROJECT_ROOT / records_candidate).resolve()
+)
+try:
+    RECORDS_ROOT.relative_to(PROJECT_ROOT)
+except ValueError as exc:
+    raise SystemExit(
+        f"daily records directory must stay inside the repository: {RECORDS_ROOT}"
+    ) from exc
 OUTPUT_PATH = (
     ARGS.output.expanduser().resolve()
     if ARGS.output
@@ -61,7 +84,7 @@ OUTPUT_PATH = (
 SIGNED_OUTPUT_PATH = (
     ARGS.signed_output.expanduser().resolve()
     if ARGS.signed_output
-    else PROJECT_ROOT / "build" / "shortcuts" / f"{ARGS.shortcut_name}.shortcut"
+    else PROJECT_ROOT / "build" / "shortcuts" / f"{SHORTCUT_NAME}.shortcut"
 )
 
 
@@ -195,8 +218,8 @@ save_script = f'''set -euo pipefail
 
 target_date='{OBJECT_REPLACEMENT}'
 compact_date=${{target_date//-/}}
-daily_root={shlex.quote(str(DAILY_ROOT))}
-destination="$daily_root/$compact_date"
+records_root={shlex.quote(str(RECORDS_ROOT))}
+destination="$records_root/$compact_date"
 /bin/mkdir -p "$destination"
 
 copied=0
@@ -346,7 +369,7 @@ workflow: dict[str, object] = {
     "WFWorkflowInputContentItemClasses": ["WFStringContentItem"],
     "WFWorkflowMinimumClientVersion": 900,
     "WFWorkflowMinimumClientVersionString": "900",
-    "WFWorkflowName": ARGS.shortcut_name,
+    "WFWorkflowName": SHORTCUT_NAME,
     "WFWorkflowOutputContentItemClasses": ["WFStringContentItem"],
     "WFWorkflowTypes": [],
 }

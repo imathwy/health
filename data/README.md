@@ -1,11 +1,14 @@
 # Local private data
 
-This directory is intentionally excluded from Git except for this notice. `scripts/setup.sh` creates the working subdirectories:
+This directory is intentionally excluded from Git except for this notice. It is
+the durable private record layer and should be backed up. `scripts/setup.sh`
+creates these subdirectories:
 
-- `daily/`: exported Apple Photos, manifests, analyses, and generated reports
+- `daily/YYYYMMDD/`: original Apple Photos exports and canonical `analysis.json`
 - `medical/`: private examination records
-- `reports/nutrition/`: generated 7/30-day Markdown, HTML, and JSON summaries
-- `state/healthlog.sqlite3`: rebuildable local nutrition index and USDA response cache
 - `supplements/`: private supplement photos and reports
 
-Do not force-add files from these folders. The pre-commit privacy check rejects them even if `.gitignore` is bypassed.
+Generated manifests, previews, reports, and SQLite state belong in `runtime/`,
+not here. Do not create root-level aliases such as `daily`. Do not force-add
+files from these folders; the pre-commit privacy check rejects them even if
+`.gitignore` is bypassed.

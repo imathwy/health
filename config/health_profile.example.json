@@ -59,10 +59,9 @@
     "allow_usda_text_queries": false
   },
   "pipeline": {
-    "shortcut_name": "导出每日照片 CLI",
-    "daily_directory": "data/daily",
-    "database_path": "data/state/healthlog.sqlite3",
-    "nutrition_reports_directory": "data/reports/nutrition",
+    "shortcut_name": "HealthLog 导出每日照片",
+    "daily_records_directory": "data/daily",
+    "runtime_directory": "runtime",
     "report_language": "zh-CN"
   }
 }

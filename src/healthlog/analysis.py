@@ -5,8 +5,7 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Iterable
 
-from .store import CORE_NUTRIENTS
-from .workspace import PROFILE_PATH, ROOT
+from .nutrition import CORE_NUTRIENTS
 
 
 CLASSIFICATIONS = {"consumed_food", "possible_food", "unrelated", "unreviewed"}
@@ -30,13 +29,14 @@ NUTRITION_SOURCE_TYPES = {
     "manual",
     "unknown",
 }
+PROFILE_REFERENCE = "config/health_profile.json"
 
 
 def analysis_template(target: date, manifest: dict[str, Any]) -> dict[str, Any]:
     return {
         "schema_version": 2,
         "date": target.isoformat(),
-        "profile": PROFILE_PATH.relative_to(ROOT).as_posix(),
+        "profile": PROFILE_REFERENCE,
         "day_context": {
             "day_type": "unknown",
             "training_notes": "",

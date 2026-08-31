@@ -10,24 +10,21 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from .nutrition import CORE_NUTRIENTS
+
 
 API_ROOT = "https://api.nal.usda.gov/fdc/v1"
 DEFAULT_DATA_TYPES = ("Foundation", "SR Legacy", "Survey (FNDDS)")
-CORE_NUTRIENTS = (
-    "kcal",
-    "protein_g",
-    "carbohydrate_g",
-    "fat_g",
-    "fiber_g",
-    "sodium_mg",
-)
 
 # FoodData Central nutrient IDs. Names are fallbacks for older/abridged payloads.
 NUTRIENT_SPECS: dict[str, dict[str, Any]] = {
     "kcal": {
         "ids": (1008, 2047, 2048),
-        "names": ("Energy", "Metabolizable Energy (Atwater General Factor)",
-                  "Metabolizable Energy (Atwater Specific Factor)"),
+        "names": (
+            "Energy",
+            "Metabolizable Energy (Atwater General Factor)",
+            "Metabolizable Energy (Atwater Specific Factor)",
+        ),
         "unit": "kcal",
     },
     "protein_g": {"ids": (1003,), "names": ("Protein",), "unit": "g"},
@@ -160,9 +157,7 @@ def search_foods(
 def food_details(fdc_id: int, *, api_key: str, timeout: int = 30) -> FDCResponse:
     if fdc_id <= 0:
         raise FDCError("FDC ID 必须是正整数")
-    payload = _request_json(
-        "GET", f"food/{fdc_id}", api_key=api_key, timeout=timeout
-    )
+    payload = _request_json("GET", f"food/{fdc_id}", api_key=api_key, timeout=timeout)
     return FDCResponse("food", {"fdc_id": fdc_id}, payload)
 
 
@@ -291,7 +286,8 @@ def analysis_item_candidate(
     return {
         "name": food.get("description", ""),
         "portion": (
-            f"{grams_low:g} g" if grams_low == grams_high
+            f"{grams_low:g} g"
+            if grams_low == grams_high
             else f"{grams_low:g}–{grams_high:g} g"
         ),
         "nutrition": {key: scaled[key] for key in CORE_NUTRIENTS if key in scaled},

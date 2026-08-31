@@ -1,3 +1,4 @@
+import ast
 import tempfile
 import unittest
 from datetime import date
@@ -7,6 +8,19 @@ from healthlog.errors import PipelineError
 from healthlog.media import manifest_preview_path
 from healthlog.presentation import audit_static_html
 from healthlog.workspace import WorkspacePaths, paths_for
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def local_imports(module_name: str) -> set[str]:
+    source = PROJECT_ROOT / "src" / "healthlog" / f"{module_name}.py"
+    tree = ast.parse(source.read_text(encoding="utf-8"))
+    return {
+        node.module.split(".", 1)[0]
+        for node in ast.walk(tree)
+        if isinstance(node, ast.ImportFrom) and node.level == 1 and node.module
+    }
 
 
 def profile(**pipeline_overrides: str) -> dict:
@@ -20,6 +34,21 @@ def profile(**pipeline_overrides: str) -> dict:
 
 
 class LayerBoundaryTests(unittest.TestCase):
+    def test_domain_modules_do_not_import_outward_adapters(self) -> None:
+        adapters = {
+            "cli",
+            "commands",
+            "fdc",
+            "media",
+            "presentation",
+            "store",
+            "workspace",
+        }
+
+        for module_name in ("analysis", "nutrition", "summary"):
+            with self.subTest(module=module_name):
+                self.assertFalse(local_imports(module_name) & adapters)
+
     def test_workspace_paths_have_distinct_typed_owners(self) -> None:
         paths = paths_for(date(2026, 1, 2), profile())
 

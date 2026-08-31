@@ -1,28 +1,40 @@
 # Local HealthLog
 
-Local HealthLog 是一套 macOS 本地优先的饮食记录流水线：Apple Shortcut 按日期导出照片，Codex 检查全部图片并生成带不确定区间和来源记录的 `analysis.json`，随后产出静态 Markdown/HTML、同步本地 SQLite，并通过统一健康门户切换补剂、每日饮食和 7/30 天汇总。
+**English** | [简体中文](README.zh-CN.md)
+
+Local HealthLog is a local-first nutrition logging pipeline for macOS. An Apple
+Shortcut exports photos for a requested date, Codex reviews every image and
+creates a source-aware `analysis.json` with uncertainty intervals, and the
+application renders static Markdown and HTML, updates a local SQLite index, and
+combines supplement guidance, daily records, and 7/30-day summaries in one
+private health portal.
 
 ```mermaid
 flowchart LR
-    A[日期] --> B[Apple Photos Shortcut]
-    B --> C[本地原图]
-    C --> D[runtime 中的清单]
-    C --> P[site 中的网页预览]
-    D --> E[Codex 逐图检查]
+    A[Date] --> B[Apple Photos Shortcut]
+    B --> C[Local original media]
+    C --> D[Manifest in runtime]
+    C --> P[Web previews in site]
+    D --> E[Codex reviews every image]
     P --> E
-    U[可选 USDA 文本查询] --> E
+    U[Optional USDA text lookup] --> E
     E --> F[analysis.json v2]
     F --> G[runtime: Markdown / JSON]
-    F --> W[site: HTML 与网页资产]
-    F --> H[本地 SQLite]
-    H --> I[7 / 30 天汇总]
+    F --> W[site: HTML and web assets]
+    F --> H[Local SQLite]
+    H --> I[7 / 30-day summaries]
 ```
 
-核心约束：原图不修改，私密数据不进 Git；照片只证明“可能吃了什么和多少”，营养组成来源单独记录；所有估算保留下界和上界，不把区间中点伪装成实测值。
+The core constraints are simple: original media is never modified, private data
+never enters Git, photo evidence and nutrition-composition sources remain
+separate, and every estimate preserves lower and upper bounds instead of
+presenting a midpoint as a measurement.
 
-## Clone 与初始化
+## Clone and bootstrap
 
-要求：macOS、Python 3.10+、系统自带的 `shortcuts`。HEIC 预览优先使用 ImageMagick，未安装时回退到 macOS `sips`。运行时没有第三方 Python 依赖。
+Requirements: macOS, Python 3.10 or later, and the built-in `shortcuts` command.
+HEIC preview generation prefers ImageMagick and falls back to the macOS `sips`
+tool. The runtime has no third-party Python dependencies.
 
 ```bash
 git clone <repository-url> local-healthlog
@@ -30,53 +42,77 @@ cd local-healthlog
 ./scripts/setup.sh --open-shortcut
 ```
 
-脚本会：
+The setup script:
 
-- 从安全模板创建被忽略的 `config/health_profile.json`；
-- 创建长期记录目录 `data/`、机器运行目录 `runtime/` 与网页展示目录 `site/`；
-- 可选安装 `diet` 与 Codex Skill 的用户级链接；
-- 为当前 clone 的绝对路径构建并签名 Shortcut；
-- 初始化私有 SQLite 并运行环境检查。
+- creates the ignored `config/health_profile.json` from a safe template;
+- creates `data/` for durable records, `runtime/` for derived state, and `site/`
+  for private browser output;
+- optionally installs user-level links for the `diet` command and Codex Skill;
+- builds and signs a clone-specific Shortcut containing the correct absolute
+  paths;
+- initializes the private SQLite database and runs environment diagnostics.
 
-Apple 要求首次手工导入 Shortcut，并允许它读取 Photos。完成后编辑本地健康档案中的目标值。纯代码或 CI 式检查可以运行：
+Apple requires the first Shortcut import to be performed manually and asks for
+Photos access. After importing it, edit the targets in the local health profile.
+For code-only or CI-style validation, run:
 
 ```bash
 ./scripts/setup.sh --no-install --skip-shortcut
 ```
 
-## 每日分析
+## Daily analysis
 
-在 Codex 中说：
+In Codex, ask:
 
-> 使用 `$daily-diet-pipeline` 分析昨天的饮食。
+> Use `$daily-diet-pipeline` to analyze yesterday's diet.
 
-终端对应流程：
+The equivalent terminal workflow is:
 
 ```bash
 diet prepare yesterday
-# Codex 检查全部预览并填写 analysis.json
+# Codex reviews every preview and completes analysis.json
 diet render yesterday
 diet verify yesterday
 diet status yesterday
 diet dashboard
 ```
 
-`diet yesterday` 是 `diet prepare yesterday` 的缩写。Shortcut 只能直接写入 `data/daily/YYYYMMDD/`；CLI 会拒绝根目录别名或符号链接返回的路径。`render` 将 Markdown 写入 `runtime/`、HTML 与网页图片写入 `site/`，并同步统一门户和 SQLite；`verify` 会检查原图哈希、预览、schema、静态链接、目录边界、报告、门户和数据库哈希。
+`diet yesterday` is shorthand for `diet prepare yesterday`. The Shortcut may
+write only to `data/daily/YYYYMMDD/`; the CLI rejects root-level aliases and
+paths returned through symlinks. `render` writes Markdown to `runtime/`, writes
+HTML and browser assets to `site/`, and synchronizes the portal and SQLite.
+`verify` checks original-media hashes, previews, the schema, static links,
+directory boundaries, reports, the portal, and the database hash.
 
-本地入口是 `site/index.html`。它按“总览 → 健康计划 / 每日饮食 / 长期趋势 → 详细报告”分层，并在一个页面内切换健康与补剂、最近一天、全部日期、7 天和 30 天报告。所有浏览器页面及其专用图片集中在 `site/`；页面不加载外部脚本、字体或图片，“单独打开”可脱离门户查看当前报告。
+The local entry point is `site/index.html`. Its navigation follows “overview →
+health plan / daily diet / trends → detailed report” and switches among the
+supplement report, latest day, all dates, and 7/30-day summaries without leaving
+the portal. Every browser page and display-only image stays under `site/`. Pages
+load no external scripts, fonts, or images, and each report can also be opened
+on its own.
 
-Schema v2 为每个食物条目分开记录：
+Schema v2 records separate evidence dimensions for every food item:
 
-- `evidence.portion_method`：称重、用户说明、包装份量、照片估份或未知；
-- `evidence.nutrition_source`：包装标签、USDA FDC、配方估算、人工录入或未知；
-- `nutrition`：热量、蛋白质、碳水、脂肪、纤维、钠的区间；
-- `optional_nutrients`：仅保存标签或数据库实际支持的糖、钾、钙等，不把缺失值填成零。
+- `evidence.portion_method`: measured weight, user-provided serving, package
+  serving, visual estimate, or unknown;
+- `evidence.nutrition_source`: package label, USDA FDC, recipe estimate, manual
+  entry, or unknown;
+- `nutrition`: intervals for energy, protein, carbohydrate, fat, fiber, and
+  sodium;
+- `optional_nutrients`: sugar, potassium, calcium, and other values only when a
+  label or database actually supports them; missing values are never stored as
+  zero.
 
-## 可选 USDA FoodData Central
+## Optional USDA FoodData Central lookup
 
-USDA 查询只发送食物文字或 FDC ID，不上传照片、健康档案或分析。默认优先 Foundation、SR Legacy 和 Survey/FNDDS；混合食堂菜继续使用配方宽区间。
+USDA requests send only food text or an FDC ID. They never upload photos, the
+health profile, or an analysis. Foundation, SR Legacy, and Survey/FNDDS records
+are preferred by default; mixed cafeteria dishes continue to use broad recipe
+intervals.
 
-Codex 自动决定是否查询时会遵守本地档案的 `privacy.allow_usda_text_queries`；直接运行以下 `fdc-*` 命令本身视为一次显式查询请求。
+When Codex decides whether to query automatically, it follows
+`privacy.allow_usda_text_queries` in the local profile. Running an `fdc-*`
+command directly is itself an explicit lookup request.
 
 ```bash
 diet fdc-search "salmon cooked" --limit 5 --agent
@@ -84,82 +120,102 @@ diet fdc-food 171999 --grams 150:220 --agent
 diet fdc-food 171999 --grams 150:220 --offline --agent
 ```
 
-查询结果缓存在被忽略的 SQLite 中。没有 API key 时使用 USDA 的限流 `DEMO_KEY`；长期使用可在 shell 环境设置：
+Responses are cached in the ignored SQLite database. Without an API key, the
+client uses USDA's rate-limited `DEMO_KEY`. For regular use, set a key in the
+shell environment:
 
 ```bash
 export FDC_API_KEY="your-data-gov-key"
 ```
 
-不要把真实 key 写入配置或 `.env.example`。本项目也不会自动加载 `.env`。
+Never place a real key in configuration or `.env.example`. The application does
+not load `.env` automatically.
 
-## 7/30 天汇总
+## 7/30-day summaries
 
 ```bash
 diet summary --days 7 --end today
 diet summary --days 30 --end yesterday --agent
 ```
 
-JSON 与 Markdown 位于 `runtime/reports/nutrition/`，无外部资源的静态 HTML 位于 `site/nutrition/`。汇总会列出实际记录天数与缺失日期，只对有记录日期求平均，并分别处理区间上下界。少于 5 个有效日期时明确显示“数据不足”，不推断趋势。
+JSON and Markdown are written to `runtime/reports/nutrition/`; self-contained
+static HTML is written to `site/nutrition/`. A summary reports logged and missing
+dates, averages only the logged dates, and processes lower and upper interval
+bounds separately. With fewer than five logged dates it reports insufficient
+data instead of inferring a trend.
 
-如果手工复制或批量修改了旧记录：
+After copying or editing old records outside the normal workflow, run:
 
 ```bash
 diet rebuild-db
 diet db-status
 ```
 
-`analysis.json` 是可审阅的主记录；SQLite 是可重建索引，不是唯一数据源。
+`analysis.json` is the reviewable source of truth. SQLite is a rebuildable index,
+not the only copy of the records.
 
-## 文件结构
+## Repository layout
 
 ```text
 .
-├── bin/diet                     # clone-local CLI
+├── bin/diet                     # Clone-local CLI
 ├── config/
 │   ├── health_profile.example.json
-│   └── health_profile.json      # 私密、忽略
-├── data/                        # 长期私有记录、忽略
-│   ├── daily/YYYYMMDD/          # 原始媒体 + canonical analysis.json
+│   └── health_profile.json      # Private and ignored
+├── data/                        # Durable private records; ignored
+│   ├── daily/YYYYMMDD/          # Original media + canonical analysis.json
 │   ├── medical/
 │   └── supplements/
-├── runtime/                     # 可删除重建的私有产物、忽略
-│   ├── daily/YYYYMMDD/          # manifest、分析模板、每日 Markdown
-│   ├── reports/nutrition/       # 7/30 天 JSON 与 Markdown
-│   └── state/healthlog.sqlite3  # SQLite 索引与 USDA 缓存
-├── site/                        # 私有网页展示层、忽略
-│   ├── index.html               # 统一静态健康门户
-│   ├── health/                  # 健康与补剂 HTML、网页资产
-│   ├── daily/YYYYMMDD/          # 每日 HTML 与 JPEG 预览
-│   └── nutrition/               # 7/30 天 HTML
-├── src/healthlog/               # 分层应用代码
-│   ├── cli.py                   # 参数解析与退出码
-│   ├── commands.py              # 用例编排
-│   ├── analysis.py              # 分析 schema、验证与目标比较
-│   ├── nutrition.py             # 营养领域词汇与区间聚合
-│   ├── summary.py               # 长期汇总领域逻辑
-│   ├── workspace.py             # 配置、路径边界与原子文件 I/O
-│   ├── media.py                 # Shortcut、媒体清单与预览
-│   ├── presentation.py          # Markdown、HTML 与本地门户
-│   ├── store.py                 # 可重建 SQLite 适配器
-│   └── fdc.py                   # USDA FoodData Central 适配器
-├── tests/                       # 无个人数据的标准库测试
-├── scripts/                     # 初始化、Shortcut 构建、隐私检查
-├── skills/daily-diet-pipeline/  # 可安装 Codex Skill 与渐进式参考
-├── build/                       # 生成物、忽略
-└── docs/                        # 架构、隐私与上游设计审查
+├── runtime/                     # Rebuildable private output; ignored
+│   ├── daily/YYYYMMDD/          # Manifest, template, daily Markdown
+│   ├── reports/nutrition/       # 7/30-day JSON and Markdown
+│   └── state/healthlog.sqlite3  # SQLite index and USDA cache
+├── site/                        # Private browser presentation; ignored
+│   ├── index.html               # Unified static health portal
+│   ├── health/                  # Health/supplement HTML and web assets
+│   ├── daily/YYYYMMDD/          # Daily HTML and JPEG previews
+│   └── nutrition/               # 7/30-day HTML
+├── src/healthlog/               # Layered application code
+│   ├── cli.py                   # Argument parsing and exit codes
+│   ├── commands.py              # Use-case orchestration
+│   ├── analysis.py              # Analysis schema, validation, targets
+│   ├── nutrition.py             # Nutrition vocabulary and interval aggregation
+│   ├── summary.py               # Longitudinal summary domain logic
+│   ├── workspace.py             # Config, path boundaries, atomic file I/O
+│   ├── media.py                 # Shortcut, media manifest, previews
+│   ├── presentation.py          # Markdown, HTML, local portal
+│   ├── store.py                 # Rebuildable SQLite adapter
+│   └── fdc.py                   # USDA FoodData Central adapter
+├── tests/                       # Standard-library tests without personal data
+├── scripts/                     # Setup, Shortcut build, privacy checks
+├── skills/daily-diet-pipeline/  # Installable Codex Skill and references
+├── build/                       # Generated and ignored
+└── docs/                        # Architecture, privacy, upstream design review
 ```
 
-## 测试与隐私检查
+## Tests and privacy checks
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 scripts/check_privacy.py
 ```
 
-Git 只应包含代码、文档、示例配置和 Skill。个人档案、照片、医疗记录、补剂记录、分析、报告、数据库、USDA 缓存、Shortcut 生成物和密钥都保留在本机。`data/` 是需要备份的私有事实层，`runtime/` 是机器运行层，`site/` 是唯一网页展示层，`build/` 是开发生成层；仓库根目录不保留 `daily` 等兼容链接。详见 [隐私边界](docs/privacy.md) 和 [架构](docs/architecture.md)。
+Git should contain only source code, documentation, example configuration, and
+the Skill. The personal profile, photos, medical and supplement records,
+analyses, reports, databases, USDA cache, generated Shortcut, and secrets remain
+local. `data/` is the private source-of-truth layer that should be backed up;
+`runtime/` is machine state; `site/` is the only browser-facing tree; and
+`build/` contains developer output. The repository root keeps no compatibility
+aliases such as `daily`. See the [privacy boundary](docs/privacy.md) and
+[architecture](docs/architecture.md).
 
-本项目从现有营养 Skills 借鉴了接口思想，并独立实现了适合照片证据的来源模型；取舍与许可证见 [上游设计审查](docs/upstream-inspirations.md)。
+The project borrows interface ideas from existing nutrition Skills and
+independently implements a provenance model suited to photo evidence. See the
+[upstream design review](docs/upstream-inspirations.md) for trade-offs and
+licenses.
 
-应用代码遵循单向依赖：`cli → commands → domain/adapters`，领域模块
-`analysis / nutrition / summary` 不反向导入文件系统、媒体、网页、SQLite
-或网络适配器。具体职责和依赖图见 [架构](docs/architecture.md)。
+Application dependencies flow in one direction: `cli → commands →
+domain/adapters`. The `analysis`, `nutrition`, and `summary` domain modules do
+not import filesystem, media, presentation, SQLite, or network adapters. See
+the [architecture document](docs/architecture.md) for module ownership and the
+dependency graph.

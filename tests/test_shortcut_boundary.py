@@ -4,7 +4,8 @@ from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
-from healthlog.cli import PipelineError, run_shortcut
+from healthlog.errors import PipelineError
+from healthlog.media import run_shortcut
 
 
 class ShortcutBoundaryTests(unittest.TestCase):
@@ -19,7 +20,7 @@ class ShortcutBoundaryTests(unittest.TestCase):
             ),
             stderr="",
         )
-        with patch("healthlog.cli.subprocess.run", return_value=completed):
+        with patch("healthlog.media.subprocess.run", return_value=completed):
             with self.assertRaisesRegex(PipelineError, "输出目录不匹配"):
                 run_shortcut(
                     date(2026, 8, 31),
@@ -39,7 +40,7 @@ class ShortcutBoundaryTests(unittest.TestCase):
             ),
             stderr="",
         )
-        with patch("healthlog.cli.subprocess.run", return_value=completed):
+        with patch("healthlog.media.subprocess.run", return_value=completed):
             result = run_shortcut(
                 date(2026, 8, 31),
                 "test",

@@ -81,201 +81,253 @@ def validate_range(value: Any, label: str, errors: list[str]) -> None:
         errors.append(f"{label} 范围无效：{value}")
 
 
+class AnalysisValidator:
+    """Validate one analysis while keeping cross-record state explicit."""
+
+    def __init__(self, analysis: dict[str, Any], manifest: dict[str, Any]) -> None:
+        self.analysis = analysis
+        self.manifest = manifest
+        self.errors: list[str] = []
+        self.warnings: list[str] = []
+        self.schema_version = analysis.get("schema_version")
+        self.manifest_files = {asset["file"] for asset in manifest.get("assets", [])}
+        self.day_context: dict[str, Any] = {}
+        self.day_type: Any = None
+        self.image_records: dict[str, dict[str, Any]] = {}
+        self.meal_records: dict[str, dict[str, Any]] = {}
+
+    def validate(self) -> tuple[list[str], list[str]]:
+        self._validate_schema_and_date()
+        self._validate_day_context()
+        self._validate_images()
+        self._validate_manifest_coverage()
+        self._validate_meals()
+        self._validate_image_meal_links()
+        self._validate_assessment_and_metadata()
+        self._add_warnings()
+        return self.errors, self.warnings
+
+    def _validate_schema_and_date(self) -> None:
+        if self.schema_version not in ANALYSIS_SCHEMA_VERSIONS:
+            versions = " 或 ".join(
+                str(value) for value in sorted(ANALYSIS_SCHEMA_VERSIONS)
+            )
+            self.errors.append(f"analysis.json schema_version 必须是 {versions}")
+        elif self.schema_version == 1:
+            self.warnings.append("analysis.json 仍是 schema v1，食物来源元数据不完整")
+        if self.analysis.get("date") != self.manifest.get("date"):
+            self.errors.append("analysis.json 与 manifest.json 的日期不一致")
+
+    def _validate_day_context(self) -> None:
+        value = self.analysis.get("day_context")
+        if not isinstance(value, dict):
+            self.errors.append("day_context 必须是对象")
+            value = {}
+        self.day_context = value
+        self.day_type = value.get("day_type")
+        if self.day_type not in DAY_TYPES:
+            self.errors.append(f"day_context.day_type 无效：{self.day_type!r}")
+
+    def _validate_images(self) -> None:
+        rows = self.analysis.get("images")
+        if not isinstance(rows, list):
+            self.errors.append("images 必须是数组")
+            rows = []
+        for index, row in enumerate(rows):
+            self._validate_image(index, row)
+
+    def _validate_image(self, index: int, row: Any) -> None:
+        if not isinstance(row, dict):
+            self.errors.append(f"images[{index}] 必须是对象")
+            return
+        filename = row.get("file")
+        if not isinstance(filename, str) or not filename:
+            self.errors.append(f"images[{index}].file 缺失")
+            return
+        if filename in self.image_records:
+            self.errors.append(f"图片记录重复：{filename}")
+        self.image_records[filename] = row
+        classification = row.get("classification")
+        if classification not in CLASSIFICATIONS:
+            self.errors.append(f"{filename} 的 classification 无效：{classification!r}")
+        elif classification == "unreviewed":
+            self.errors.append(f"{filename} 尚未检查")
+        for key in ("observations", "uncertainties"):
+            if not isinstance(row.get(key), list):
+                self.errors.append(f"{filename}.{key} 必须是数组")
+
+    def _validate_manifest_coverage(self) -> None:
+        analysis_files = set(self.image_records)
+        missing = sorted(self.manifest_files - analysis_files)
+        extra = sorted(analysis_files - self.manifest_files)
+        if missing:
+            self.errors.append(f"analysis.json 缺少图片记录：{', '.join(missing)}")
+        if extra:
+            self.errors.append(f"analysis.json 含不存在的图片记录：{', '.join(extra)}")
+
+    def _validate_meals(self) -> None:
+        meals = self.analysis.get("meals")
+        if not isinstance(meals, list):
+            self.errors.append("meals 必须是数组")
+            meals = []
+        for meal_index, meal in enumerate(meals):
+            self._validate_meal(meal_index, meal)
+
+    def _validate_meal(self, meal_index: int, meal: Any) -> None:
+        if not isinstance(meal, dict):
+            self.errors.append(f"meals[{meal_index}] 必须是对象")
+            return
+        meal_id = meal.get("id")
+        if not isinstance(meal_id, str) or not meal_id:
+            self.errors.append(f"meals[{meal_index}].id 缺失")
+            return
+        if meal_id in self.meal_records:
+            self.errors.append(f"餐次 id 重复：{meal_id}")
+        self.meal_records[meal_id] = meal
+        if not isinstance(meal.get("label"), str) or not meal.get("label"):
+            self.errors.append(f"餐次 {meal_id} 缺少 label")
+        self._validate_meal_images(meal_id, meal.get("images"))
+        items = meal.get("items")
+        if not isinstance(items, list) or not items:
+            self.errors.append(f"餐次 {meal_id} 至少需要一个食物条目")
+            return
+        for item_index, item in enumerate(items):
+            self._validate_item(meal_id, item_index, item)
+
+    def _validate_meal_images(self, meal_id: str, meal_images: Any) -> None:
+        if not isinstance(meal_images, list):
+            self.errors.append(f"餐次 {meal_id}.images 必须是数组")
+            return
+        for filename in meal_images:
+            if filename not in self.manifest_files:
+                self.errors.append(f"餐次 {meal_id} 引用了不存在的图片：{filename}")
+
+    def _validate_item(self, meal_id: str, item_index: int, item: Any) -> None:
+        prefix = f"餐次 {meal_id}.items[{item_index}]"
+        if not isinstance(item, dict):
+            self.errors.append(f"{prefix} 必须是对象")
+            return
+        if not isinstance(item.get("name"), str) or not item.get("name"):
+            self.errors.append(f"{prefix}.name 缺失")
+        if not isinstance(item.get("portion"), str) or not item.get("portion"):
+            self.errors.append(f"{prefix}.portion 缺失")
+        nutrition = item.get("nutrition")
+        if not isinstance(nutrition, dict):
+            self.errors.append(f"{prefix}.nutrition 必须是对象")
+            return
+        for nutrient in NUTRIENT_KEYS:
+            validate_range(
+                nutrition.get(nutrient),
+                f"{prefix}.nutrition.{nutrient}",
+                self.errors,
+            )
+        self._validate_optional_nutrients(prefix, item.get("optional_nutrients", {}))
+        confidence = item.get("confidence")
+        if confidence not in CONFIDENCE_LEVELS:
+            self.errors.append(f"{prefix}.confidence 无效：{confidence!r}")
+        self._validate_evidence(prefix, item.get("evidence"))
+
+    def _validate_optional_nutrients(self, prefix: str, nutrients: Any) -> None:
+        if not isinstance(nutrients, dict):
+            self.errors.append(f"{prefix}.optional_nutrients 必须是对象")
+            return
+        for nutrient, value in nutrients.items():
+            if not isinstance(nutrient, str) or not nutrient:
+                self.errors.append(f"{prefix}.optional_nutrients 含无效名称")
+                continue
+            if nutrient in NUTRIENT_KEYS:
+                self.errors.append(
+                    f"{prefix}.optional_nutrients.{nutrient} 与核心营养素重复"
+                )
+                continue
+            validate_range(
+                value, f"{prefix}.optional_nutrients.{nutrient}", self.errors
+            )
+
+    def _validate_evidence(self, prefix: str, evidence: Any) -> None:
+        if self.schema_version == 2 and not isinstance(evidence, dict):
+            self.errors.append(f"{prefix}.evidence 必须是对象")
+        if not isinstance(evidence, dict):
+            return
+        portion_method = evidence.get("portion_method")
+        if portion_method not in PORTION_METHODS:
+            self.errors.append(
+                f"{prefix}.evidence.portion_method 无效：{portion_method!r}"
+            )
+        nutrition_source = evidence.get("nutrition_source")
+        if nutrition_source not in NUTRITION_SOURCE_TYPES:
+            self.errors.append(
+                f"{prefix}.evidence.nutrition_source 无效：{nutrition_source!r}"
+            )
+        self._validate_references(prefix, evidence.get("references", []))
+        if not isinstance(evidence.get("notes", []), list):
+            self.errors.append(f"{prefix}.evidence.notes 必须是数组")
+
+    def _validate_references(self, prefix: str, references: Any) -> None:
+        if not isinstance(references, list):
+            self.errors.append(f"{prefix}.evidence.references 必须是数组")
+            return
+        for index, reference in enumerate(references):
+            if not isinstance(reference, dict):
+                self.errors.append(f"{prefix}.evidence.references[{index}] 必须是对象")
+                continue
+            provider = reference.get("provider")
+            if not isinstance(provider, str) or not provider:
+                self.errors.append(
+                    f"{prefix}.evidence.references[{index}].provider 缺失"
+                )
+
+    def _validate_image_meal_links(self) -> None:
+        for filename, row in self.image_records.items():
+            classification = row.get("classification")
+            meal_id = row.get("meal_id")
+            if classification == "consumed_food":
+                if meal_id not in self.meal_records:
+                    self.errors.append(
+                        f"{filename} 标记为 consumed_food，但 meal_id 无效"
+                    )
+                elif filename not in self.meal_records[meal_id].get("images", []):
+                    self.errors.append(f"{filename} 未列入餐次 {meal_id} 的 images")
+            elif meal_id not in {None, ""} and meal_id not in self.meal_records:
+                self.errors.append(f"{filename} 的 meal_id 无效：{meal_id}")
+
+    def _validate_assessment_and_metadata(self) -> None:
+        assessment = self.analysis.get("assessment")
+        if not isinstance(assessment, dict):
+            self.errors.append("assessment 必须是对象")
+        else:
+            for key in ("summary", "strengths", "gaps", "next_actions"):
+                if not isinstance(assessment.get(key), list):
+                    self.errors.append(f"assessment.{key} 必须是数组")
+            if not isinstance(assessment.get("supplement_note"), str):
+                self.errors.append("assessment.supplement_note 必须是字符串")
+        if not isinstance(self.analysis.get("assumptions"), list):
+            self.errors.append("assumptions 必须是数组")
+        if self.analysis.get("overall_confidence") not in CONFIDENCE_LEVELS:
+            self.errors.append("overall_confidence 必须是 low、medium 或 high")
+
+    def _add_warnings(self) -> None:
+        possible_count = sum(
+            row.get("classification") == "possible_food"
+            for row in self.image_records.values()
+        )
+        if possible_count:
+            self.warnings.append(f"有 {possible_count} 张图片只能确定为可能摄入")
+        if self.day_type == "unknown":
+            self.warnings.append("当天训练类型未知，热量和碳水使用默认目标")
+        if self.day_context.get("photo_coverage") in {
+            None,
+            "",
+            "unknown",
+            "partial",
+        }:
+            self.warnings.append("照片覆盖可能不完整，不能把估算视为完整饮食日志")
+
+
 def validate_analysis(
     analysis: dict[str, Any], manifest: dict[str, Any]
 ) -> tuple[list[str], list[str]]:
-    errors: list[str] = []
-    warnings: list[str] = []
-
-    schema_version = analysis.get("schema_version")
-    if schema_version not in ANALYSIS_SCHEMA_VERSIONS:
-        errors.append(
-            "analysis.json schema_version 必须是 "
-            + " 或 ".join(str(value) for value in sorted(ANALYSIS_SCHEMA_VERSIONS))
-        )
-    elif schema_version == 1:
-        warnings.append("analysis.json 仍是 schema v1，食物来源元数据不完整")
-    if analysis.get("date") != manifest.get("date"):
-        errors.append("analysis.json 与 manifest.json 的日期不一致")
-
-    day_context = analysis.get("day_context")
-    if not isinstance(day_context, dict):
-        errors.append("day_context 必须是对象")
-        day_context = {}
-    day_type = day_context.get("day_type")
-    if day_type not in DAY_TYPES:
-        errors.append(f"day_context.day_type 无效：{day_type!r}")
-
-    rows = analysis.get("images")
-    if not isinstance(rows, list):
-        errors.append("images 必须是数组")
-        rows = []
-    image_records: dict[str, dict[str, Any]] = {}
-    for index, row in enumerate(rows):
-        if not isinstance(row, dict):
-            errors.append(f"images[{index}] 必须是对象")
-            continue
-        filename = row.get("file")
-        if not isinstance(filename, str) or not filename:
-            errors.append(f"images[{index}].file 缺失")
-            continue
-        if filename in image_records:
-            errors.append(f"图片记录重复：{filename}")
-        image_records[filename] = row
-        classification = row.get("classification")
-        if classification not in CLASSIFICATIONS:
-            errors.append(f"{filename} 的 classification 无效：{classification!r}")
-        elif classification == "unreviewed":
-            errors.append(f"{filename} 尚未检查")
-        for key in ("observations", "uncertainties"):
-            if not isinstance(row.get(key), list):
-                errors.append(f"{filename}.{key} 必须是数组")
-
-    manifest_files = {asset["file"] for asset in manifest.get("assets", [])}
-    analysis_files = set(image_records)
-    missing = sorted(manifest_files - analysis_files)
-    extra = sorted(analysis_files - manifest_files)
-    if missing:
-        errors.append(f"analysis.json 缺少图片记录：{', '.join(missing)}")
-    if extra:
-        errors.append(f"analysis.json 含不存在的图片记录：{', '.join(extra)}")
-
-    meals = analysis.get("meals")
-    if not isinstance(meals, list):
-        errors.append("meals 必须是数组")
-        meals = []
-    meal_records: dict[str, dict[str, Any]] = {}
-    for meal_index, meal in enumerate(meals):
-        if not isinstance(meal, dict):
-            errors.append(f"meals[{meal_index}] 必须是对象")
-            continue
-        meal_id = meal.get("id")
-        if not isinstance(meal_id, str) or not meal_id:
-            errors.append(f"meals[{meal_index}].id 缺失")
-            continue
-        if meal_id in meal_records:
-            errors.append(f"餐次 id 重复：{meal_id}")
-        meal_records[meal_id] = meal
-        if not isinstance(meal.get("label"), str) or not meal.get("label"):
-            errors.append(f"餐次 {meal_id} 缺少 label")
-        meal_images = meal.get("images")
-        if not isinstance(meal_images, list):
-            errors.append(f"餐次 {meal_id}.images 必须是数组")
-            meal_images = []
-        for filename in meal_images:
-            if filename not in manifest_files:
-                errors.append(f"餐次 {meal_id} 引用了不存在的图片：{filename}")
-        items = meal.get("items")
-        if not isinstance(items, list) or not items:
-            errors.append(f"餐次 {meal_id} 至少需要一个食物条目")
-            continue
-        for item_index, item in enumerate(items):
-            prefix = f"餐次 {meal_id}.items[{item_index}]"
-            if not isinstance(item, dict):
-                errors.append(f"{prefix} 必须是对象")
-                continue
-            if not isinstance(item.get("name"), str) or not item.get("name"):
-                errors.append(f"{prefix}.name 缺失")
-            if not isinstance(item.get("portion"), str) or not item.get("portion"):
-                errors.append(f"{prefix}.portion 缺失")
-            nutrition = item.get("nutrition")
-            if not isinstance(nutrition, dict):
-                errors.append(f"{prefix}.nutrition 必须是对象")
-                continue
-            for nutrient in NUTRIENT_KEYS:
-                validate_range(
-                    nutrition.get(nutrient), f"{prefix}.nutrition.{nutrient}", errors
-                )
-            optional_nutrients = item.get("optional_nutrients", {})
-            if not isinstance(optional_nutrients, dict):
-                errors.append(f"{prefix}.optional_nutrients 必须是对象")
-            else:
-                for nutrient, value in optional_nutrients.items():
-                    if not isinstance(nutrient, str) or not nutrient:
-                        errors.append(f"{prefix}.optional_nutrients 含无效名称")
-                        continue
-                    if nutrient in NUTRIENT_KEYS:
-                        errors.append(
-                            f"{prefix}.optional_nutrients.{nutrient} 与核心营养素重复"
-                        )
-                        continue
-                    validate_range(
-                        value, f"{prefix}.optional_nutrients.{nutrient}", errors
-                    )
-            confidence = item.get("confidence")
-            if confidence not in CONFIDENCE_LEVELS:
-                errors.append(f"{prefix}.confidence 无效：{confidence!r}")
-            evidence = item.get("evidence")
-            if schema_version == 2 and not isinstance(evidence, dict):
-                errors.append(f"{prefix}.evidence 必须是对象")
-            if isinstance(evidence, dict):
-                portion_method = evidence.get("portion_method")
-                if portion_method not in PORTION_METHODS:
-                    errors.append(
-                        f"{prefix}.evidence.portion_method 无效：{portion_method!r}"
-                    )
-                nutrition_source = evidence.get("nutrition_source")
-                if nutrition_source not in NUTRITION_SOURCE_TYPES:
-                    errors.append(
-                        f"{prefix}.evidence.nutrition_source 无效：{nutrition_source!r}"
-                    )
-                references = evidence.get("references", [])
-                if not isinstance(references, list):
-                    errors.append(f"{prefix}.evidence.references 必须是数组")
-                else:
-                    for reference_index, reference in enumerate(references):
-                        if not isinstance(reference, dict):
-                            errors.append(
-                                f"{prefix}.evidence.references[{reference_index}] 必须是对象"
-                            )
-                            continue
-                        if not isinstance(
-                            reference.get("provider"), str
-                        ) or not reference.get("provider"):
-                            errors.append(
-                                f"{prefix}.evidence.references[{reference_index}].provider 缺失"
-                            )
-                if not isinstance(evidence.get("notes", []), list):
-                    errors.append(f"{prefix}.evidence.notes 必须是数组")
-
-    for filename, row in image_records.items():
-        classification = row.get("classification")
-        meal_id = row.get("meal_id")
-        if classification == "consumed_food":
-            if meal_id not in meal_records:
-                errors.append(f"{filename} 标记为 consumed_food，但 meal_id 无效")
-            elif filename not in meal_records[meal_id].get("images", []):
-                errors.append(f"{filename} 未列入餐次 {meal_id} 的 images")
-        elif meal_id not in {None, ""} and meal_id not in meal_records:
-            errors.append(f"{filename} 的 meal_id 无效：{meal_id}")
-
-    assessment = analysis.get("assessment")
-    if not isinstance(assessment, dict):
-        errors.append("assessment 必须是对象")
-    else:
-        for key in ("summary", "strengths", "gaps", "next_actions"):
-            if not isinstance(assessment.get(key), list):
-                errors.append(f"assessment.{key} 必须是数组")
-        if not isinstance(assessment.get("supplement_note"), str):
-            errors.append("assessment.supplement_note 必须是字符串")
-
-    if not isinstance(analysis.get("assumptions"), list):
-        errors.append("assumptions 必须是数组")
-    if analysis.get("overall_confidence") not in CONFIDENCE_LEVELS:
-        errors.append("overall_confidence 必须是 low、medium 或 high")
-
-    possible = [
-        filename
-        for filename, row in image_records.items()
-        if row.get("classification") == "possible_food"
-    ]
-    if possible:
-        warnings.append(f"有 {len(possible)} 张图片只能确定为可能摄入")
-    if day_type == "unknown":
-        warnings.append("当天训练类型未知，热量和碳水使用默认目标")
-    if day_context.get("photo_coverage") in {None, "", "unknown", "partial"}:
-        warnings.append("照片覆盖可能不完整，不能把估算视为完整饮食日志")
-    return errors, warnings
+    return AnalysisValidator(analysis, manifest).validate()
 
 
 def sum_nutrition(analysis: dict[str, Any]) -> dict[str, list[float]]:

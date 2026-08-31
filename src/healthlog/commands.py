@@ -206,15 +206,14 @@ def render(args: argparse.Namespace) -> int:
     return 0
 
 
-def verify(args: argparse.Namespace) -> int:
-    profile = load_profile()
-    target = resolve_date(args.date)
-    paths, manifest, analysis = load_analysis_bundle(target, profile)
-    errors, warnings = validate_analysis(analysis, manifest)
-
-    record_dir = paths.record_dir
+def _verify_media(
+    paths: WorkspacePaths,
+    manifest: dict[str, Any],
+    errors: list[str],
+    warnings: list[str],
+) -> None:
     for asset in manifest.get("assets", []):
-        source = record_dir / asset["relative_path"]
+        source = paths.record_dir / asset["relative_path"]
         if not source.exists():
             errors.append(f"源媒体缺失：{source.name}")
             continue
@@ -233,6 +232,8 @@ def verify(args: argparse.Namespace) -> int:
         else:
             warnings.append(f"没有预览：{source.name}")
 
+
+def _verify_reports(target: date, paths: WorkspacePaths, errors: list[str]) -> None:
     for report_path in (paths.report_md, paths.report_html):
         if not report_path.exists() or report_path.stat().st_size == 0:
             errors.append(f"报告缺失：{report_path}")
@@ -247,37 +248,56 @@ def verify(args: argparse.Namespace) -> int:
         if not index_path.exists() or index_path.stat().st_size == 0:
             errors.append(f"每日索引缺失：{index_path}")
 
+
+def _database_totals_match(
+    db_state: dict[str, Any],
+    analysis: dict[str, Any],
+    errors: list[str],
+) -> None:
+    expected_totals = sum_nutrition(analysis)
+    for nutrient in NUTRIENT_KEYS:
+        stored = db_state.get("nutrients", {}).get(nutrient)
+        if stored is None:
+            errors.append(f"营养数据库缺少 {nutrient}")
+            continue
+        if any(
+            abs(float(stored[key]) - float(expected_totals[nutrient][index])) > 1e-6
+            for index, key in enumerate(("low", "high"))
+        ):
+            errors.append(f"营养数据库 {nutrient} 合计与 analysis.json 不一致")
+
+
+def _verify_database(
+    profile: dict[str, Any],
+    target: date,
+    paths: WorkspacePaths,
+    analysis: dict[str, Any],
+    errors: list[str],
+) -> Path:
     db_path = database_path(profile)
     if not db_path.exists():
         errors.append(f"营养数据库缺失：{db_path}")
-    else:
-        try:
-            with NutritionStore(db_path) as store:
-                db_state = store.day_state(target.isoformat())
-            if db_state is None:
-                errors.append(f"营养数据库没有 {target.isoformat()} 记录")
-            elif db_state.get("analysis_sha256") != sha256_file(paths.analysis):
-                errors.append("营养数据库记录已过期；重新运行 diet render")
-            else:
-                expected_totals = sum_nutrition(analysis)
-                for nutrient in NUTRIENT_KEYS:
-                    stored = db_state.get("nutrients", {}).get(nutrient)
-                    if stored is None:
-                        errors.append(f"营养数据库缺少 {nutrient}")
-                        continue
-                    if any(
-                        abs(
-                            float(stored[key]) - float(expected_totals[nutrient][index])
-                        )
-                        > 1e-6
-                        for index, key in enumerate(("low", "high"))
-                    ):
-                        errors.append(
-                            f"营养数据库 {nutrient} 合计与 analysis.json 不一致"
-                        )
-        except (OSError, RuntimeError, sqlite3.Error) as exc:
-            errors.append(f"营养数据库无法读取：{exc}")
+        return db_path
+    try:
+        with NutritionStore(db_path) as store:
+            db_state = store.day_state(target.isoformat())
+        if db_state is None:
+            errors.append(f"营养数据库没有 {target.isoformat()} 记录")
+        elif db_state.get("analysis_sha256") != sha256_file(paths.analysis):
+            errors.append("营养数据库记录已过期；重新运行 diet render")
+        else:
+            _database_totals_match(db_state, analysis, errors)
+    except (OSError, RuntimeError, sqlite3.Error) as exc:
+        errors.append(f"营养数据库无法读取：{exc}")
+    return db_path
 
+
+def _verify_html(
+    paths: WorkspacePaths,
+    manifest: dict[str, Any],
+    errors: list[str],
+    warnings: list[str],
+) -> None:
     for html_path in (
         paths.report_html,
         paths.daily_index_html,
@@ -295,6 +315,8 @@ def verify(args: argparse.Namespace) -> int:
                     f"HTML 图片数不一致：期望 {expected_images}，实际 {audit.image_count}"
                 )
 
+
+def _verify_html_boundaries(paths: WorkspacePaths, errors: list[str]) -> None:
     boundary_roots = {
         (ROOT / "data").resolve(),
         paths.records_root.resolve(),
@@ -304,6 +326,18 @@ def verify(args: argparse.Namespace) -> int:
         if boundary_root.exists():
             for misplaced_html in boundary_root.rglob("*.html"):
                 errors.append(f"HTML 不应位于 {boundary_root.name}/：{misplaced_html}")
+
+
+def verify(args: argparse.Namespace) -> int:
+    profile = load_profile()
+    target = resolve_date(args.date)
+    paths, manifest, analysis = load_analysis_bundle(target, profile)
+    errors, warnings = validate_analysis(analysis, manifest)
+    _verify_media(paths, manifest, errors, warnings)
+    _verify_reports(target, paths, errors)
+    db_path = _verify_database(profile, target, paths, analysis, errors)
+    _verify_html(paths, manifest, errors, warnings)
+    _verify_html_boundaries(paths, errors)
 
     if errors:
         print("VERIFY=failed")

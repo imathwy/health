@@ -112,12 +112,12 @@ def load_profile() -> dict[str, Any]:
     return profile
 
 
-def configured_private_path(
-    profile: dict[str, Any], key: str, default: str
-) -> Path:
+def configured_private_path(profile: dict[str, Any], key: str, default: str) -> Path:
     raw = str(profile.get("pipeline", {}).get(key, default))
     candidate = Path(raw).expanduser()
-    resolved = candidate.resolve() if candidate.is_absolute() else (ROOT / candidate).resolve()
+    resolved = (
+        candidate.resolve() if candidate.is_absolute() else (ROOT / candidate).resolve()
+    )
     try:
         resolved.relative_to(ROOT)
     except ValueError as exc:
@@ -161,9 +161,7 @@ def _ensure_disjoint_roots(configured_roots: dict[str, Path]) -> None:
                 or left_path in right_path.parents
                 or right_path in left_path.parents
             ):
-                raise PipelineError(
-                    f"{left_name} 与 {right_name} 必须是互不包含的目录"
-                )
+                raise PipelineError(f"{left_name} 与 {right_name} 必须是互不包含的目录")
 
 
 def paths_for(target: date, profile: dict[str, Any]) -> WorkspacePaths:

@@ -229,7 +229,9 @@ def validate_analysis(
                                 f"{prefix}.evidence.references[{reference_index}] 必须是对象"
                             )
                             continue
-                        if not isinstance(reference.get("provider"), str) or not reference.get("provider"):
+                        if not isinstance(
+                            reference.get("provider"), str
+                        ) or not reference.get("provider"):
                             errors.append(
                                 f"{prefix}.evidence.references[{reference_index}].provider 缺失"
                             )

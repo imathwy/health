@@ -43,7 +43,11 @@ def manifest_preview_path(
     candidate = Path(raw_path)
     if int(manifest.get("schema_version", 0)) >= 3:
         boundary = paths.site_root.resolve()
-        resolved = candidate.resolve() if candidate.is_absolute() else (ROOT / candidate).resolve()
+        resolved = (
+            candidate.resolve()
+            if candidate.is_absolute()
+            else (ROOT / candidate).resolve()
+        )
     else:
         boundary = paths.runtime_day_dir.resolve()
         resolved = (
@@ -157,7 +161,9 @@ def media_files(day_dir: Path) -> list[Path]:
     )
 
 
-def make_image_preview(source: Path, destination: Path) -> tuple[str | None, str | None]:
+def make_image_preview(
+    source: Path, destination: Path
+) -> tuple[str | None, str | None]:
     magick = shutil.which("magick")
     sips = shutil.which("sips")
     if not magick and not sips:
@@ -203,9 +209,7 @@ def make_image_preview(source: Path, destination: Path) -> tuple[str | None, str
                 str(temporary),
             ]
             converter = "sips"
-        completed = subprocess.run(
-            command, text=True, capture_output=True, check=False
-        )
+        completed = subprocess.run(command, text=True, capture_output=True, check=False)
         if completed.returncode != 0 or temporary.stat().st_size == 0:
             return (
                 completed.stderr or completed.stdout or f"{converter} 转换失败"
@@ -217,7 +221,9 @@ def make_image_preview(source: Path, destination: Path) -> tuple[str | None, str
         temporary.unlink(missing_ok=True)
 
 
-def make_video_preview(source: Path, destination: Path) -> tuple[str | None, str | None]:
+def make_video_preview(
+    source: Path, destination: Path
+) -> tuple[str | None, str | None]:
     qlmanage = shutil.which("qlmanage")
     if not qlmanage:
         return "找不到 qlmanage", None
@@ -243,7 +249,9 @@ def make_video_preview(source: Path, destination: Path) -> tuple[str | None, str
             ).strip(), "quicklook"
         error, image_converter = make_image_preview(candidates[0], destination)
         if error is None:
-            os.utime(destination, ns=(source.stat().st_atime_ns, source.stat().st_mtime_ns))
+            os.utime(
+                destination, ns=(source.stat().st_atime_ns, source.stat().st_mtime_ns)
+            )
         converter = f"quicklook+{image_converter}" if image_converter else "quicklook"
         return error, converter
 
@@ -291,7 +299,9 @@ def build_manifest(
                 "extension": source.suffix.lower(),
                 "size_bytes": stat.st_size,
                 "sha256": digest,
-                "modified_at": datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(),
+                "modified_at": datetime.fromtimestamp(stat.st_mtime)
+                .astimezone()
+                .isoformat(),
                 "capture_time": capture_time(source),
                 "paired_files": [
                     name for name in stems[source.stem.lower()] if name != source.name

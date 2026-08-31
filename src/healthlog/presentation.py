@@ -41,9 +41,7 @@ class StaticHTMLAudit(HTMLParser):
         if decl.strip().lower() == "doctype html":
             self.has_doctype = True
 
-    def handle_starttag(
-        self, tag: str, attrs: list[tuple[str, str | None]]
-    ) -> None:
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         values = dict(attrs)
         if tag == "img":
             self.image_count += 1
@@ -83,9 +81,7 @@ def audit_static_html(path: Path) -> tuple[list[str], list[str], StaticHTMLAudit
             continue
         referenced = (path.parent / relative).resolve()
         if not referenced.exists():
-            errors.append(
-                f"HTML 本地引用缺失：{path.name} 的 {tag}[{key}]={raw_value}"
-            )
+            errors.append(f"HTML 本地引用缺失：{path.name} 的 {tag}[{key}]={raw_value}")
     return errors, warnings, audit
 
 
@@ -132,10 +128,12 @@ def evidence_label(item: dict[str, Any]) -> str:
         "unknown": "份量未知",
     }
     nutrition_source = source_labels.get(
-        str(evidence.get("nutrition_source")), str(evidence.get("nutrition_source", "未明确"))
+        str(evidence.get("nutrition_source")),
+        str(evidence.get("nutrition_source", "未明确")),
     )
     portion_method = portion_labels.get(
-        str(evidence.get("portion_method")), str(evidence.get("portion_method", "份量未知"))
+        str(evidence.get("portion_method")),
+        str(evidence.get("portion_method", "份量未知")),
     )
     references = evidence.get("references", [])
     reference_ids = []
@@ -164,9 +162,7 @@ def render_markdown(
     assessment = analysis["assessment"]
     image_by_file = {row["file"]: row for row in analysis["images"]}
     preview_by_file = {
-        asset["file"]: preview_href(
-            asset, manifest, paths, paths.report_md.parent
-        )
+        asset["file"]: preview_href(asset, manifest, paths, paths.report_md.parent)
         for asset in manifest["assets"]
     }
 
@@ -305,8 +301,12 @@ def render_markdown(
 
 def html_list(items: Any, empty: str = "暂无") -> str:
     if not isinstance(items, list) or not items:
-        return f"<p class=\"muted\">{html.escape(empty)}</p>"
-    return "<ul>" + "".join(f"<li>{html.escape(str(item))}</li>" for item in items) + "</ul>"
+        return f'<p class="muted">{html.escape(empty)}</p>'
+    return (
+        "<ul>"
+        + "".join(f"<li>{html.escape(str(item))}</li>" for item in items)
+        + "</ul>"
+    )
 
 
 def status_class(status: str) -> str:
@@ -332,7 +332,7 @@ def render_html(
         f"<td>{html.escape(row['label'])}</td>"
         f"<td>{html.escape(row['estimate'])}</td>"
         f"<td>{html.escape(row['target'])}</td>"
-        f"<td><span class=\"pill {status_class(row['status'])}\">{html.escape(row['status'])}</span></td>"
+        f'<td><span class="pill {status_class(row["status"])}">{html.escape(row["status"])}</span></td>'
         "</tr>"
         for row in comparisons
     )
@@ -344,7 +344,7 @@ def render_html(
             nutrition = item["nutrition"]
             item_rows.append(
                 "<tr>"
-                f"<td><strong>{html.escape(item['name'])}</strong><br><span class=\"muted\">{html.escape(item['portion'])}</span></td>"
+                f'<td><strong>{html.escape(item["name"])}</strong><br><span class="muted">{html.escape(item["portion"])}</span></td>'
                 f"<td>{html.escape(display_range(nutrition['kcal'], 'kcal'))}</td>"
                 f"<td>{html.escape(display_range(nutrition['protein_g'], 'g'))}</td>"
                 f"<td>{html.escape(display_range(nutrition['carbohydrate_g'], 'g'))}</td>"
@@ -354,10 +354,10 @@ def render_html(
                 "</tr>"
             )
         meal_sections.append(
-            "<section class=\"panel\">"
-            f"<div class=\"section-head\"><div><p class=\"eyebrow\">{html.escape(meal.get('time') or '时间不确定')}</p><h2>{html.escape(meal['label'])}</h2></div>"
-            f"<span class=\"pill neutral\">{len(meal.get('images', []))} 张图片</span></div>"
-            "<div class=\"table-wrap\"><table><thead><tr><th>食物与份量</th><th>热量</th><th>蛋白质</th><th>碳水</th><th>脂肪</th><th>证据</th><th>置信度</th></tr></thead>"
+            '<section class="panel">'
+            f'<div class="section-head"><div><p class="eyebrow">{html.escape(meal.get("time") or "时间不确定")}</p><h2>{html.escape(meal["label"])}</h2></div>'
+            f'<span class="pill neutral">{len(meal.get("images", []))} 张图片</span></div>'
+            '<div class="table-wrap"><table><thead><tr><th>食物与份量</th><th>热量</th><th>蛋白质</th><th>碳水</th><th>脂肪</th><th>证据</th><th>置信度</th></tr></thead>'
             f"<tbody>{''.join(item_rows)}</tbody></table></div>"
             f"{html_list(meal.get('notes', []), '无额外备注')}"
             "</section>"
@@ -366,20 +366,18 @@ def render_html(
     gallery_cards: list[str] = []
     for asset in manifest["assets"]:
         record = image_rows[asset["file"]]
-        preview = preview_href(
-            asset, manifest, paths, paths.report_html.parent
-        )
+        preview = preview_href(asset, manifest, paths, paths.report_html.parent)
         if preview:
-            media = f"<img src=\"{html.escape(preview, quote=True)}\" alt=\"{html.escape(asset['file'], quote=True)}\" loading=\"lazy\">"
+            media = f'<img src="{html.escape(preview, quote=True)}" alt="{html.escape(asset["file"], quote=True)}" loading="lazy">'
         else:
-            media = "<div class=\"no-preview\">无预览</div>"
+            media = '<div class="no-preview">无预览</div>'
         observations = "；".join(record.get("observations", [])) or "未记录可见事实"
         uncertainties = "；".join(record.get("uncertainties", [])) or "未记录"
         gallery_cards.append(
-            "<article class=\"photo-card\">"
-            f"{media}<div class=\"photo-body\"><div class=\"photo-meta\"><code>{html.escape(asset['file'])}</code>"
-            f"<span class=\"pill neutral\">{html.escape(record['classification'])}</span></div>"
-            f"<p>{html.escape(observations)}</p><p class=\"muted\">不确定性：{html.escape(uncertainties)}</p></div></article>"
+            '<article class="photo-card">'
+            f'{media}<div class="photo-body"><div class="photo-meta"><code>{html.escape(asset["file"])}</code>'
+            f'<span class="pill neutral">{html.escape(record["classification"])}</span></div>'
+            f'<p>{html.escape(observations)}</p><p class="muted">不确定性：{html.escape(uncertainties)}</p></div></article>'
         )
 
     day_context = analysis["day_context"]
@@ -419,29 +417,29 @@ def render_html(
 <body>
 <main>
   <header class="hero">
-    <p class="eyebrow">Daily Diet Review · {html.escape(day_context.get('day_type', 'unknown'))}</p>
+    <p class="eyebrow">Daily Diet Review · {html.escape(day_context.get("day_type", "unknown"))}</p>
     <h1>{target.isoformat()}</h1>
     <p>根据当天照片进行区间估算。照片不一定覆盖全部摄入，拍到的食物也不自动视为全部吃完。</p>
   </header>
   <section class="metrics">
-    <div class="metric"><span>热量</span><b>{html.escape(display_range(totals['kcal'], 'kcal'))}</b></div>
-    <div class="metric"><span>蛋白质</span><b>{html.escape(display_range(totals['protein_g'], 'g'))}</b></div>
-    <div class="metric"><span>碳水</span><b>{html.escape(display_range(totals['carbohydrate_g'], 'g'))}</b></div>
-    <div class="metric"><span>脂肪</span><b>{html.escape(display_range(totals['fat_g'], 'g'))}</b></div>
+    <div class="metric"><span>热量</span><b>{html.escape(display_range(totals["kcal"], "kcal"))}</b></div>
+    <div class="metric"><span>蛋白质</span><b>{html.escape(display_range(totals["protein_g"], "g"))}</b></div>
+    <div class="metric"><span>碳水</span><b>{html.escape(display_range(totals["carbohydrate_g"], "g"))}</b></div>
+    <div class="metric"><span>脂肪</span><b>{html.escape(display_range(totals["fat_g"], "g"))}</b></div>
   </section>
-  <div class="notice">照片覆盖：{html.escape(str(day_context.get('photo_coverage', 'unknown')))}；总体置信度：{html.escape(str(analysis.get('overall_confidence')))}。请优先看区间和方向，不要把中点当成精确值。</div>
+  <div class="notice">照片覆盖：{html.escape(str(day_context.get("photo_coverage", "unknown")))}；总体置信度：{html.escape(str(analysis.get("overall_confidence")))}。请优先看区间和方向，不要把中点当成精确值。</div>
   <section class="panel">
     <div class="section-head"><div><p class="eyebrow">Targets</p><h2>营养估算与个人目标</h2></div></div>
     <div class="table-wrap"><table><thead><tr><th>营养素</th><th>照片估算</th><th>个人目标</th><th>判断</th></tr></thead><tbody>{comparison_html}</tbody></table></div>
   </section>
-  {''.join(meal_sections)}
+  {"".join(meal_sections)}
   <section class="grid-2">
-    <div class="panel"><p class="eyebrow">Assessment</p><h2>主要发现</h2>{html_list(assessment.get('summary'))}<h3>做得好的地方</h3>{html_list(assessment.get('strengths'))}<h3>主要缺口</h3>{html_list(assessment.get('gaps'))}</div>
-    <div class="panel"><p class="eyebrow">Next actions</p><h2>下一次怎么吃</h2>{html_list(assessment.get('next_actions'))}<h3>补剂说明</h3><p>{html.escape(assessment.get('supplement_note') or '不根据单日照片新增补剂。')}</p></div>
+    <div class="panel"><p class="eyebrow">Assessment</p><h2>主要发现</h2>{html_list(assessment.get("summary"))}<h3>做得好的地方</h3>{html_list(assessment.get("strengths"))}<h3>主要缺口</h3>{html_list(assessment.get("gaps"))}</div>
+    <div class="panel"><p class="eyebrow">Next actions</p><h2>下一次怎么吃</h2>{html_list(assessment.get("next_actions"))}<h3>补剂说明</h3><p>{html.escape(assessment.get("supplement_note") or "不根据单日照片新增补剂。")}</p></div>
   </section>
-  <section class="panel"><p class="eyebrow">Evidence</p><h2>图片核对</h2><div class="gallery">{''.join(gallery_cards)}</div></section>
-  <section class="panel"><p class="eyebrow">Limits</p><h2>假设与限制</h2>{html_list(analysis.get('assumptions'))}</section>
-  <footer>生成于 {datetime.now().astimezone().isoformat(timespec='seconds')} · 本报告用于个人饮食记录，不替代医疗诊断或营养处方。</footer>
+  <section class="panel"><p class="eyebrow">Evidence</p><h2>图片核对</h2><div class="gallery">{"".join(gallery_cards)}</div></section>
+  <section class="panel"><p class="eyebrow">Limits</p><h2>假设与限制</h2>{html_list(analysis.get("assumptions"))}</section>
+  <footer>生成于 {datetime.now().astimezone().isoformat(timespec="seconds")} · 本报告用于个人饮食记录，不替代医疗诊断或营养处方。</footer>
 </main>
 </body>
 </html>
@@ -501,10 +499,13 @@ def update_daily_indexes(profile: dict[str, Any]) -> None:
     md_lines.append("")
     atomic_write_text(daily_runtime_root / "README.md", "\n".join(md_lines))
 
-    cards = "".join(
-        f"<a class=\"card\" href=\"{html.escape(entry['dir'])}/index.html\"><span>{html.escape(entry['date'])}</span><strong>{html.escape(entry['kcal'])}</strong><em>{html.escape(entry['protein'])} 蛋白质</em><p>{html.escape(entry['summary'])}</p></a>"
-        for entry in entries
-    ) or "<p>尚无已完成报告。</p>"
+    cards = (
+        "".join(
+            f'<a class="card" href="{html.escape(entry["dir"])}/index.html"><span>{html.escape(entry["date"])}</span><strong>{html.escape(entry["kcal"])}</strong><em>{html.escape(entry["protein"])} 蛋白质</em><p>{html.escape(entry["summary"])}</p></a>'
+            for entry in entries
+        )
+        or "<p>尚无已完成报告。</p>"
+    )
     page = f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>每日饮食记录</title><style>
 body{{margin:0;background:#f4f2eb;color:#18211b;font:16px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}}main{{width:min(980px,calc(100% - 28px));margin:auto;padding:52px 0}}h1{{font-size:clamp(36px,7vw,70px);margin:0 0 8px;letter-spacing:-.05em}}header p{{color:#667169}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:28px}}.card{{display:flex;flex-direction:column;gap:7px;padding:22px;border:1px solid #dfe4dc;border-radius:20px;background:#fffdf8;color:inherit;text-decoration:none;box-shadow:0 10px 30px rgba(30,50,40,.05)}}.card:hover{{transform:translateY(-2px)}}.card span,.card em{{color:#667169;font-style:normal}}.card strong{{font-size:25px}}.card p{{margin:8px 0 0}}@media(max-width:760px){{.grid{{grid-template-columns:1fr}}}}
 </style></head><body><main><header><h1>每日饮食记录</h1><p>从 Apple Photos 到结构化营养估算的本地流水线。</p></header><section class="grid">{cards}</section></main></body></html>"""
@@ -673,7 +674,7 @@ def update_dashboard(profile: dict[str, Any]) -> Path:
     <div class="brand"><div class="mark">H</div><div><strong>Local HealthLog</strong><span>个人健康工作台</span></div></div>
     <nav aria-label="健康报告导航">
       <a class="nav-home active" href="#overview" data-view="overview"><span>总览</span><b aria-hidden="true">⌂</b></a>
-      {''.join(nav_groups)}
+      {"".join(nav_groups)}
     </nav>
     <div class="privacy">仅在本机读取。原始记录位于 data，机器状态位于 runtime，网页与网页图片统一位于 site。</div>
   </aside>

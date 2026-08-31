@@ -50,6 +50,7 @@ from .store import NutritionStore
 from .summary import json_text as summary_json_text
 from .summary import make_summary, render_html as render_summary_html
 from .summary import render_markdown as render_summary_markdown
+from .tracking import tracking_targets
 from .workspace import (
     PROFILE_PATH,
     ROOT,
@@ -178,8 +179,11 @@ def render(args: argparse.Namespace) -> int:
         comparisons,
         Path(os.path.relpath(paths.analysis, paths.report_md.parent)).as_posix(),
         paths,
+        profile,
     )
-    page = render_html(target, analysis, manifest, totals, comparisons, paths)
+    page = render_html(
+        target, analysis, manifest, totals, comparisons, paths, profile
+    )
     atomic_write_text(paths.report_md, markdown)
     atomic_write_text(paths.report_html, page)
     update_daily_indexes(profile)
@@ -519,6 +523,7 @@ def nutrition_summary(args: argparse.Namespace) -> int:
         end=end,
         requested_days=args.days,
         provenance=provenance,
+        tracking_target_values=tracking_targets(profile),
     )
     report_dir = nutrition_reports_dir(profile)
     report_dir.mkdir(parents=True, exist_ok=True)

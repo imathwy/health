@@ -1,6 +1,8 @@
-# analysis.json schema v2
+# analysis.json schema v3
 
-Keep `analysis.json` human-reviewable. The CLI is the final validator; this reference shows the item-level fields added in v2.
+Keep `analysis.json` human-reviewable. The CLI is the final validator. Schema v3
+retains the v2 item provenance below and adds explicit daily observations, body
+measurements, and meal tags.
 
 ```json
 {
@@ -37,6 +39,157 @@ Keep `analysis.json` human-reviewable. The CLI is the final validator; this refe
 }
 ```
 
+Every schema-v3 meal also has `tracking_tags`:
+
+```json
+{
+  "id": "lunch",
+  "label": "Lunch",
+  "time": "12:30",
+  "images": ["IMG_0001.HEIC"],
+  "protein_target_applicable": true,
+  "tracking_tags": ["heme_iron"],
+  "notes": [],
+  "items": []
+}
+```
+
+Allowed tags:
+
+- `heme_iron`: a meaningful meat, poultry, fish, or seafood source is confirmed;
+  eggs and dairy do not qualify;
+- `oily_fish`: salmon, sardine, mackerel, herring, trout, or another defensible
+  oily-fish match is confirmed. Generic “fish” is not enough.
+
+Set `protein_target_applicable` to `true` for a main meal or intentional protein
+feeding. Set it to `false` for a fruit course, drink, condiment, or small snack
+that is not intended to meet the per-meal protein range. All meals still show
+their protein amount; only applicable meals enter target-status counts.
+
+The top-level `tracking` block is complete even when every value is unknown:
+
+```json
+{
+  "observations": {
+    "direct_water_ml": {
+      "range": [1600, 1800],
+      "source": "user_reported",
+      "coverage": "complete",
+      "notes": ["Bottle refills reported by the user"]
+    },
+    "calcium_mg": {
+      "range": [650, 900],
+      "source": "derived_from_items",
+      "coverage": "partial",
+      "notes": ["Some cafeteria dishes lack calcium composition"]
+    },
+    "sleep_hours": {
+      "range": [6.5, 6.5],
+      "source": "user_reported",
+      "coverage": "complete",
+      "notes": []
+    },
+    "caffeine_mg": {
+      "range": [120, 180],
+      "source": "package_label",
+      "coverage": "complete",
+      "notes": []
+    },
+    "training_minutes": {
+      "range": [60, 60],
+      "source": "user_reported",
+      "coverage": "complete",
+      "notes": []
+    },
+    "session_rpe": {
+      "range": [7, 7],
+      "source": "user_reported",
+      "coverage": "complete",
+      "notes": []
+    },
+    "vegetables_g": {
+      "range": [250, 350],
+      "source": "photo_review",
+      "coverage": "partial",
+      "notes": []
+    },
+    "fruit_g": {
+      "range": [180, 250],
+      "source": "photo_review",
+      "coverage": "partial",
+      "notes": []
+    }
+  },
+  "last_caffeine_time": "15:00",
+  "meal_tagging": {
+    "source": "photo_review",
+    "coverage": "partial",
+    "notes": ["Photos do not cover the full day"]
+  },
+  "iron_calcium_timing": {
+    "status": "not_applicable_no_iron_supplement",
+    "source": "user_reported",
+    "notes": []
+  },
+  "body_measurements": {
+    "weight_kg": {
+      "value": 72.0,
+      "source": "measured",
+      "recorded_at": "07:40",
+      "context": "after waking and toileting, before breakfast",
+      "notes": []
+    },
+    "waist_cm": {
+      "value": null,
+      "source": "unknown",
+      "recorded_at": null,
+      "context": "",
+      "notes": []
+    },
+    "chest_cm": {
+      "value": null,
+      "source": "unknown",
+      "recorded_at": null,
+      "context": "",
+      "notes": []
+    },
+    "upper_arm_cm": {
+      "value": null,
+      "source": "unknown",
+      "recorded_at": null,
+      "context": "",
+      "notes": []
+    },
+    "thigh_cm": {
+      "value": null,
+      "source": "unknown",
+      "recorded_at": null,
+      "context": "",
+      "notes": []
+    }
+  }
+}
+```
+
+Use `null`, never `[0, 0]`, for an unknown observation. A known zero is valid
+only with `coverage: complete`. Per-meal protein is derived from food items and
+must not be duplicated manually. Calcium is automatically summed from item
+`optional_nutrients.calcium_mg` when available; incomplete item or photo
+coverage remains partial.
+
+Allowed iron–calcium statuses:
+
+- `unknown`
+- `not_applicable_no_iron_supplement`
+- `food_only`
+- `supplements_separated`
+- `potential_supplement_overlap`
+
+Ordinary mixed-food meals use `food_only`, not
+`potential_supplement_overlap`. The latter is reserved for separate iron and
+calcium supplements taken together. Follow the iron product label or clinician
+instructions for whether high-calcium foods also need different timing.
+
 Allowed `portion_method` values:
 
 - `manual_weight`: one user-measured gram value
@@ -61,3 +214,4 @@ Rules:
 - Put a sourced zero only when the source supports zero. Missing optional nutrients stay absent.
 - `references` cite the composition source, not merely the image used for portion estimation.
 - If a package image only identifies the product but lacks a nutrition panel, use it as a reference note while keeping `nutrition_source` as `recipe_estimate` or `unknown`.
+- See `docs/tracking-metrics.md` for metric definitions, targets, and evidence rules.

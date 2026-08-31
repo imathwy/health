@@ -18,7 +18,7 @@ flowchart LR
     D --> E[Codex reviews every image]
     P --> E
     U[Optional USDA text lookup] --> E
-    E --> F[analysis.json v2]
+    E --> F[analysis.json v3]
     F --> G[runtime: Markdown / JSON]
     F --> W[site: HTML and web assets]
     F --> H[Local SQLite]
@@ -91,7 +91,7 @@ the portal. Every browser page and display-only image stays under `site/`. Pages
 load no external scripts, fonts, or images, and each report can also be opened
 on its own.
 
-Schema v2 records separate evidence dimensions for every food item:
+Schema v3 continues to record separate evidence dimensions for every food item:
 
 - `evidence.portion_method`: measured weight, user-provided serving, package
   serving, visual estimate, or unknown;
@@ -102,6 +102,21 @@ Schema v2 records separate evidence dimensions for every food item:
 - `optional_nutrients`: sugar, potassium, calcium, and other values only when a
   label or database actually supports them; missing values are never stored as
   zero.
+
+It also adds source-aware observations for direct drinking water, calcium,
+sleep, caffeine, training duration/RPE, vegetables, fruit, body weight and
+circumferences, and iron/calcium supplement timing. Per-meal protein is derived
+from food items. Heme-iron and oily-fish frequency is counted from reviewed meal
+tags. Unreported values remain `null`, and a partial photo log produces only a
+confirmed minimum event count.
+
+The public profile uses reference defaults such as 1,000 mg calcium for adults
+age 19–50, 1,700 mL base direct drinking water for an adult man, and 20–40 g
+protein per meal; local profiles can override them. Ordinary mixed meals are
+not labeled an iron/calcium conflict. The timing field primarily checks a
+separate iron supplement against a calcium supplement; follow the iron product
+label or clinician guidance for high-calcium foods.
+See [tracking metric definitions](docs/tracking-metrics.md).
 
 ## Optional USDA FoodData Central lookup
 
@@ -141,8 +156,10 @@ diet summary --days 30 --end yesterday --agent
 JSON and Markdown are written to `runtime/reports/nutrition/`; self-contained
 static HTML is written to `site/nutrition/`. A summary reports logged and missing
 dates, averages only the logged dates, and processes lower and upper interval
-bounds separately. With fewer than five logged dates it reports insufficient
-data instead of inferring a trend.
+bounds separately. It also shows per-meal protein distribution, confirmed
+heme-iron and oily-fish meal frequency, water/calcium/recovery coverage,
+iron/calcium timing, and measured body changes. With fewer than five logged
+dates it reports insufficient data instead of inferring an interval trend.
 
 After copying or editing old records outside the normal workflow, run:
 
@@ -180,6 +197,8 @@ not the only copy of the records.
 │   ├── commands.py              # Use-case orchestration
 │   ├── analysis.py              # Analysis schema, validation, targets
 │   ├── nutrition.py             # Nutrition vocabulary and interval aggregation
+│   ├── tracking.py              # Water, calcium, recovery, body, and meal metrics
+│   ├── tracking_summary.py      # Longitudinal tracking aggregation and coverage
 │   ├── summary.py               # Longitudinal summary domain logic
 │   ├── workspace.py             # Config, path boundaries, atomic file I/O
 │   ├── media.py                 # Shortcut, media manifest, previews
@@ -215,7 +234,8 @@ independently implements a provenance model suited to photo evidence. See the
 licenses.
 
 Application dependencies flow in one direction: `cli → commands →
-domain/adapters`. The `analysis`, `nutrition`, and `summary` domain modules do
+domain/adapters`. The `analysis`, `nutrition`, `tracking`, `tracking_summary`,
+and `summary` domain modules do
 not import filesystem, media, presentation, SQLite, or network adapters. See
 the [architecture document](docs/architecture.md) for module ownership and the
 dependency graph.

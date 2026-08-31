@@ -4,6 +4,7 @@ from datetime import date
 from pathlib import Path
 
 from healthlog.store import NutritionStore
+from healthlog.tracking import tracking_template
 
 
 class NutritionStoreTests(unittest.TestCase):
@@ -94,6 +95,40 @@ class NutritionStoreTests(unittest.TestCase):
         self.assertEqual(stats["food_item_count"], 1)
         self.assertEqual(state["nutrients"]["potassium_mg"]["covered_items"], 1)
         self.assertEqual(provenance, {"recipe_estimate": 1})
+
+    def test_schema_v3_tracking_and_meal_totals_are_queryable(self) -> None:
+        analysis, manifest, totals = self.sample()
+        analysis["schema_version"] = 3
+        analysis["tracking"] = tracking_template()
+        analysis["tracking"]["observations"]["direct_water_ml"] = {
+            "range": [1600, 1800],
+            "source": "user_reported",
+            "coverage": "complete",
+            "notes": [],
+        }
+        analysis["meals"][0]["tracking_tags"] = ["heme_iron"]
+        analysis["meals"][0]["protein_target_applicable"] = True
+
+        with NutritionStore(self.db_path) as store:
+            store.upsert_day(
+                analysis=analysis,
+                manifest=manifest,
+                analysis_path="data/daily/20260102/analysis.json",
+                analysis_sha256="v3",
+                totals=totals,
+                targets={},
+                comparisons=[],
+            )
+            state = store.day_state("2026-01-02")
+
+        self.assertEqual(
+            state["tracking"]["observations"]["direct_water_ml"]["range"],
+            [1600, 1800],
+        )
+        self.assertEqual(state["meals"][0]["tracking_tags"], ["heme_iron"])
+        self.assertEqual(
+            state["meals"][0]["nutrients"]["protein_g"]["low"], 20.0
+        )
 
 
 if __name__ == "__main__":

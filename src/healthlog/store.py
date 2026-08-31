@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Any
 
 from .nutrition import CORE_NUTRIENTS, nutrient_unit
+from .tracking import effective_tracking, meal_nutrition_totals
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def _json(value: Any) -> str:
@@ -61,6 +62,7 @@ class NutritionStore:
                 comparison_json TEXT NOT NULL,
                 assessment_json TEXT NOT NULL,
                 assumptions_json TEXT NOT NULL,
+                tracking_json TEXT NOT NULL DEFAULT '{}',
                 synced_at TEXT NOT NULL
             );
 
@@ -82,8 +84,22 @@ class NutritionStore:
                 meal_time TEXT NOT NULL,
                 images_json TEXT NOT NULL,
                 notes_json TEXT NOT NULL,
+                tracking_tags_json TEXT NOT NULL DEFAULT '[]',
+                protein_target_applicable INTEGER NOT NULL DEFAULT 1,
                 meal_index INTEGER NOT NULL,
                 PRIMARY KEY (date, meal_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS meal_nutrients (
+                date TEXT NOT NULL,
+                meal_id TEXT NOT NULL,
+                nutrient TEXT NOT NULL,
+                low REAL NOT NULL,
+                high REAL NOT NULL,
+                unit TEXT NOT NULL,
+                PRIMARY KEY (date, meal_id, nutrient),
+                FOREIGN KEY (date, meal_id) REFERENCES meals(date, meal_id)
+                    ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS food_items (
@@ -134,9 +150,20 @@ class NutritionStore:
             );
 
             CREATE INDEX IF NOT EXISTS food_items_date_idx ON food_items(date);
+            CREATE INDEX IF NOT EXISTS meal_nutrients_date_idx
+                ON meal_nutrients(date);
             CREATE INDEX IF NOT EXISTS images_classification_idx
                 ON images(classification);
             """
+        )
+        self._ensure_column(
+            "daily_logs", "tracking_json", "TEXT NOT NULL DEFAULT '{}'"
+        )
+        self._ensure_column(
+            "meals", "tracking_tags_json", "TEXT NOT NULL DEFAULT '[]'"
+        )
+        self._ensure_column(
+            "meals", "protein_target_applicable", "INTEGER NOT NULL DEFAULT 1"
         )
         current = self.connection.execute(
             "SELECT value FROM metadata WHERE key = 'schema_version'"
@@ -152,6 +179,16 @@ class NutritionStore:
             (str(SCHEMA_VERSION),),
         )
         self.connection.commit()
+
+    def _ensure_column(self, table: str, column: str, declaration: str) -> None:
+        columns = {
+            str(row["name"])
+            for row in self.connection.execute(f"PRAGMA table_info({table})")
+        }
+        if column not in columns:
+            self.connection.execute(
+                f"ALTER TABLE {table} ADD COLUMN {column} {declaration}"
+            )
 
     def upsert_day(
         self,
@@ -181,8 +218,9 @@ class NutritionStore:
                     date, analysis_schema_version, day_type, training_notes,
                     photo_coverage, overall_confidence, asset_count,
                     analysis_path, analysis_sha256, target_snapshot_json,
-                    comparison_json, assessment_json, assumptions_json, synced_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    comparison_json, assessment_json, assumptions_json,
+                    tracking_json, synced_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     target,
@@ -198,6 +236,7 @@ class NutritionStore:
                     _json(comparisons),
                     _json(analysis.get("assessment", {})),
                     _json(analysis.get("assumptions", [])),
+                    _json(effective_tracking(analysis)),
                     _now(),
                 ),
             )
@@ -227,8 +266,9 @@ class NutritionStore:
                     """
                     INSERT INTO meals(
                         date, meal_id, label, meal_time, images_json,
-                        notes_json, meal_index
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                        notes_json, tracking_tags_json,
+                        protein_target_applicable, meal_index
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         target,
@@ -237,9 +277,27 @@ class NutritionStore:
                         str(meal.get("time") or ""),
                         _json(meal.get("images", [])),
                         _json(meal.get("notes", [])),
+                        _json(meal.get("tracking_tags", [])),
+                        int(bool(meal.get("protein_target_applicable", True))),
                         meal_index,
                     ),
                 )
+                for nutrient, value in meal_nutrition_totals(meal).items():
+                    self.connection.execute(
+                        """
+                        INSERT INTO meal_nutrients(
+                            date, meal_id, nutrient, low, high, unit
+                        ) VALUES (?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            target,
+                            meal_id,
+                            nutrient,
+                            float(value[0]),
+                            float(value[1]),
+                            nutrient_unit(nutrient),
+                        ),
+                    )
                 for item_index, item in enumerate(meal.get("items", [])):
                     evidence = item.get("evidence", {})
                     cursor = self.connection.execute(
@@ -357,6 +415,7 @@ class NutritionStore:
             )
         }
         result = dict(row)
+        result["tracking"] = json.loads(result.pop("tracking_json"))
         result["nutrients"] = nutrients
         result["meal_count"] = self.connection.execute(
             "SELECT COUNT(*) FROM meals WHERE date = ?", (target,)
@@ -364,6 +423,35 @@ class NutritionStore:
         result["food_item_count"] = self.connection.execute(
             "SELECT COUNT(*) FROM food_items WHERE date = ?", (target,)
         ).fetchone()[0]
+        result["meals"] = self._meals_for_day(target)
+        return result
+
+    def _meals_for_day(self, target: str) -> list[dict[str, Any]]:
+        rows = self.connection.execute(
+            "SELECT * FROM meals WHERE date = ? ORDER BY meal_index", (target,)
+        ).fetchall()
+        result: list[dict[str, Any]] = []
+        for row in rows:
+            meal = dict(row)
+            meal["tracking_tags"] = json.loads(meal.pop("tracking_tags_json"))
+            meal["protein_target_applicable"] = bool(
+                meal["protein_target_applicable"]
+            )
+            meal["nutrients"] = {
+                nutrient["nutrient"]: {
+                    "low": float(nutrient["low"]),
+                    "high": float(nutrient["high"]),
+                    "unit": nutrient["unit"],
+                }
+                for nutrient in self.connection.execute(
+                    """
+                    SELECT * FROM meal_nutrients
+                    WHERE date = ? AND meal_id = ? ORDER BY nutrient
+                    """,
+                    (target, row["meal_id"]),
+                )
+            }
+            result.append(meal)
         return result
 
     def list_days(self, start: date, end: date) -> list[dict[str, Any]]:
@@ -378,6 +466,7 @@ class NutritionStore:
         results: list[dict[str, Any]] = []
         for row in rows:
             day = dict(row)
+            day["tracking"] = json.loads(day.pop("tracking_json"))
             day["nutrients"] = {
                 nutrient["nutrient"]: {
                     "low": float(nutrient["low"]),
@@ -392,6 +481,7 @@ class NutritionStore:
                 )
             }
             day["comparisons"] = json.loads(day.pop("comparison_json"))
+            day["meals"] = self._meals_for_day(str(row["date"]))
             results.append(day)
         return results
 

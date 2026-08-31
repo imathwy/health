@@ -35,7 +35,16 @@
     "fat_g": [55, 80],
     "fiber_g": [25, 35],
     "sodium_mg_max": 2000,
-    "water_l_base": 1.5
+    "water_l_base": 1.7,
+    "tracking": {
+      "protein_per_meal_g": [20, 40],
+      "direct_water_ml_base": 1700,
+      "calcium_mg_target": 1000,
+      "sleep_hours_min": 7,
+      "caffeine_mg_max": 400,
+      "vegetables_g_min": 300,
+      "fruit_g_min": 200
+    }
   },
   "diet_context": {
     "food_photo_means_consumed": true,

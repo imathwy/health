@@ -17,6 +17,6 @@ The official [USDA FoodData Central API](https://fdc.nal.usda.gov/api-guide/) is
 
 1. **Separate quantity evidence from composition evidence.** A photo can support a portion range while USDA supports nutrient density; neither source proves the other.
 2. **Use intervals end to end.** SQLite stores lower and upper bounds, and summaries average each bound separately.
-3. **Keep an audit trail.** Every schema-v2 item names its portion method, nutrition source, optional references, and notes.
+3. **Keep an audit trail.** Every schema-v3 item names its portion method, nutrition source, optional references, and notes; daily observations also record source and coverage.
 4. **Treat optional nutrients as incomplete.** A missing micronutrient is unknown. It is never coerced to zero or used to diagnose deficiency.
 5. **Keep local records canonical.** The database and static reports are derived artifacts and can be rebuilt.

@@ -28,7 +28,7 @@ The repository has six explicit boundaries:
 |---|---|---|
 | Entry adapter | `cli`, `__main__` | Parse arguments, route commands, translate expected failures to exit codes |
 | Application | `commands` | Orchestrate dated workflows and compose ports/adapters |
-| Domain | `analysis`, `nutrition`, `summary` | Analysis schema, nutrient vocabulary, interval math, validation, target comparison, longitudinal summaries |
+| Domain | `analysis`, `nutrition`, `tracking`, `tracking_summary`, `summary` | Analysis schema, nutrient vocabulary, interval math, daily observations, meal-derived metrics, validation, target comparison, longitudinal summaries |
 | External adapters | `workspace`, `media`, `presentation`, `store`, `fdc` | Filesystem/config, Shortcuts and previews, Markdown/HTML, SQLite, USDA HTTP |
 | Foundation | `errors` | Stable application error shared by inward and outward layers |
 
@@ -43,7 +43,11 @@ flowchart TD
     APP --> STORE[store]
     APP --> FDC[fdc]
     ANALYSIS --> NUTRITION[nutrition]
+    ANALYSIS --> TRACKING[tracking]
+    TRACKING --> NUTRITION
     SUMMARY --> NUTRITION
+    SUMMARY --> TRACKING_SUMMARY[tracking_summary]
+    TRACKING_SUMMARY --> TRACKING
     STORE --> NUTRITION
     FDC --> NUTRITION
     MEDIA --> WORKSPACE
@@ -71,7 +75,7 @@ flowchart LR
     D --> E[Codex review]
     P --> E
     U[Optional USDA text or ID query] --> E
-    E --> F[data/daily: analysis.json v2]
+    E --> F[data/daily: analysis.json v3]
     F --> G[runtime/daily: Markdown]
     F --> W[site/daily: HTML]
     F --> H[runtime/state: SQLite index]
@@ -86,6 +90,14 @@ The two uncertainties in each item stay separate: `portion_method` explains how
 consumed quantity was inferred, while `nutrition_source` explains where
 composition values came from. This prevents a database match from implying that
 the photographed portion was measured.
+
+Schema v3 keeps photo-derived meal evidence and non-photo observations in one
+dated, reviewable record without confusing their provenance. `tracking.py` owns
+the vocabulary and validation for direct water, calcium, recovery, training,
+body measurements, iron/calcium timing, and meal tags. Per-meal protein and
+weekly event frequencies are projections; they are never duplicated as manual
+facts. SQLite stores an effective tracking snapshot and meal nutrient totals,
+while the original `analysis.json` remains canonical.
 
 The Shortcut's returned `EXPORT_DIR` must exactly match the configured dated
 record directory. The CLI deliberately rejects root aliases such as `daily/`,

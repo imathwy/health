@@ -6,13 +6,18 @@ from datetime import date
 from typing import Any, Iterable
 
 from .nutrition import CORE_NUTRIENTS
+from .tracking import (
+    tracking_template,
+    validate_meal_tracking_tags,
+    validate_tracking,
+)
 
 
 CLASSIFICATIONS = {"consumed_food", "possible_food", "unrelated", "unreviewed"}
 DAY_TYPES = {"unknown", "rest", "strength", "swim", "tennis", "mixed"}
 CONFIDENCE_LEVELS = {"low", "medium", "high"}
 NUTRIENT_KEYS = CORE_NUTRIENTS
-ANALYSIS_SCHEMA_VERSIONS = {1, 2}
+ANALYSIS_SCHEMA_VERSIONS = {1, 2, 3}
 PORTION_METHODS = {
     "manual_weight",
     "manual_range",
@@ -34,7 +39,7 @@ PROFILE_REFERENCE = "config/health_profile.json"
 
 def analysis_template(target: date, manifest: dict[str, Any]) -> dict[str, Any]:
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "date": target.isoformat(),
         "profile": PROFILE_REFERENCE,
         "day_context": {
@@ -54,6 +59,7 @@ def analysis_template(target: date, manifest: dict[str, Any]) -> dict[str, Any]:
             for asset in manifest.get("assets", [])
         ],
         "meals": [],
+        "tracking": tracking_template(),
         "assessment": {
             "summary": [],
             "strengths": [],
@@ -103,6 +109,10 @@ class AnalysisValidator:
         self._validate_manifest_coverage()
         self._validate_meals()
         self._validate_image_meal_links()
+        if self.schema_version == 3:
+            validate_tracking(
+                self.analysis.get("tracking"), self.errors, self.warnings
+            )
         self._validate_assessment_and_metadata()
         self._add_warnings()
         return self.errors, self.warnings
@@ -115,6 +125,8 @@ class AnalysisValidator:
             self.errors.append(f"analysis.json schema_version 必须是 {versions}")
         elif self.schema_version == 1:
             self.warnings.append("analysis.json 仍是 schema v1，食物来源元数据不完整")
+        elif self.schema_version == 2:
+            self.warnings.append("analysis.json 仍是 schema v2，扩展健康指标尚未结构化")
         if self.analysis.get("date") != self.manifest.get("date"):
             self.errors.append("analysis.json 与 manifest.json 的日期不一致")
 
@@ -186,6 +198,10 @@ class AnalysisValidator:
         self.meal_records[meal_id] = meal
         if not isinstance(meal.get("label"), str) or not meal.get("label"):
             self.errors.append(f"餐次 {meal_id} 缺少 label")
+        if self.schema_version == 3:
+            validate_meal_tracking_tags(
+                meal, f"餐次 {meal_id}", self.errors
+            )
         self._validate_meal_images(meal_id, meal.get("images"))
         items = meal.get("items")
         if not isinstance(items, list) or not items:

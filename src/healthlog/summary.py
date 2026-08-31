@@ -8,6 +8,8 @@ from datetime import date, timedelta
 from typing import Any
 
 from .nutrition import CORE_NUTRIENTS, average_ranges, confidence_counts
+from .tracking import DEFAULT_TRACKING_TARGETS, IRON_CALCIUM_LABELS
+from .tracking_summary import make_tracking_summary
 
 
 NUTRIENT_LABELS = {
@@ -18,7 +20,6 @@ NUTRIENT_LABELS = {
     "fiber_g": "膳食纤维",
     "sodium_mg": "钠",
 }
-
 
 def _clean(value: float) -> int | float:
     rounded = round(float(value), 1)
@@ -93,7 +94,12 @@ def make_summary(
     end: date,
     requested_days: int,
     provenance: dict[str, int],
+    tracking_target_values: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    tracking_target_values = {
+        **DEFAULT_TRACKING_TARGETS,
+        **(tracking_target_values or {}),
+    }
     expected_dates = [
         (start + timedelta(days=offset)).isoformat() for offset in range(requested_days)
     ]
@@ -112,7 +118,7 @@ def make_summary(
         nutrient: interval_trend(rows, nutrient, start) for nutrient in CORE_NUTRIENTS
     }
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "period": {
             "start": start.isoformat(),
             "end": end.isoformat(),
@@ -126,6 +132,12 @@ def make_summary(
         "confidence_counts": confidence_counts(rows),
         "nutrition_source_counts": provenance,
         "trends": trends,
+        "tracking": make_tracking_summary(
+            rows=rows,
+            start=start,
+            requested_days=requested_days,
+            targets=tracking_target_values,
+        ),
         "days": [
             {
                 "date": row["date"],
@@ -137,6 +149,8 @@ def make_summary(
                     for key, value in row["nutrients"].items()
                     if key in CORE_NUTRIENTS
                 },
+                "tracking": row.get("tracking", {}),
+                "meals": row.get("meals", []),
             }
             for row in rows
         ],
@@ -145,6 +159,8 @@ def make_summary(
             "每日数据来自照片和份量区间；趋势分别使用下界和上界。",
             "照片覆盖不完整时，汇总仍可能低估全天摄入。",
             "少于 5 个有记录日期时不判断趋势方向。",
+            "血红素铁与油性鱼按已确认餐次计数；覆盖不完整时只是确认下限。",
+            "体重和围度变化只比较实际测量，不等同于脂肪或肌肉变化。",
         ],
     }
 
@@ -176,6 +192,112 @@ def render_markdown(summary: dict[str, Any]) -> str:
             f"{display_interval(average['low'], average['high'], average['unit'])} | "
             f"{average['logged_days']} | {trend['label']} |"
         )
+
+    tracking = summary.get("tracking", {})
+    lines.extend(
+        [
+            "",
+            "## 饮水、钙与恢复指标",
+            "",
+            "| 指标 | 有记录日均区间 | 有记录天数 | 完整记录天数 | 参考目标 |",
+            "|---|---:|---:|---:|---:|",
+        ]
+    )
+    observation_averages = tracking.get("observation_averages", {})
+    for average in observation_averages.values():
+        estimate = (
+            display_interval(average["low"], average["high"], average["unit"])
+            if average.get("low") is not None and average.get("high") is not None
+            else "未记录"
+        )
+        lines.append(
+            f"| {average['label']} | "
+            f"{estimate} | "
+            f"{average['logged_days']} | {average['complete_days']} | "
+            f"{average['target']} |"
+        )
+    if not observation_averages:
+        lines.append("| — | 未记录 | 0 | 0 | — |")
+
+    protein = tracking.get("meal_protein", {})
+    target = protein.get("target_g", [20, 40])
+    counts = protein.get("counts", {})
+    lines.extend(
+        [
+            "",
+            "## 每餐蛋白质",
+            "",
+            (
+                f"> 参考范围 {display_interval(target[0], target[1], 'g')}；"
+                f"目标适用 {protein.get('applicable_meals', 0)}/"
+                f"{protein.get('observed_meals', 0)} 餐；"
+                f"目标内 {counts.get('目标内', 0)} 餐，"
+                f"低于参考 {counts.get('低于参考', 0)} 餐，"
+                f"高于参考 {counts.get('高于参考', 0)} 餐，"
+                f"区间重叠 {counts.get('区间重叠', 0)} 餐。"
+            ),
+            "",
+            "| 日期 | 餐次 | 时间 | 蛋白质估算 | 判断 |",
+            "|---|---|---|---:|---|",
+        ]
+    )
+    for meal in protein.get("meals", []):
+        lines.append(
+            f"| {meal['date']} | {meal['label']} | {meal['time'] or '—'} | "
+            f"{display_interval(meal['low'], meal['high'], meal['unit'])} | "
+            f"{meal['status']} |"
+        )
+    if not protein.get("meals"):
+        lines.append("| — | — | — | — | 尚无记录 |")
+
+    lines.extend(
+        [
+            "",
+            "## 血红素铁与油性鱼频次",
+            "",
+            "| 指标 | 已确认餐次 | 日历周确认下限 | 完整标注日 | 部分标注日 | 未知日 |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for frequency in tracking.get("meal_frequencies", {}).values():
+        lines.append(
+            f"| {frequency['label']} | {frequency['confirmed_meals']} | "
+            f"{frequency['confirmed_meals_per_week']}/周 | "
+            f"{frequency['complete_days']} | {frequency['partial_days']} | "
+            f"{frequency['unknown_days']} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## 体重与围度变化",
+            "",
+            "| 指标 | 首次 | 最近 | 差值 | 测量天数 |",
+            "|---|---:|---:|---:|---:|",
+        ]
+    )
+    body_changes = tracking.get("body_changes", {})
+    for change in body_changes.values():
+        delta = (
+            f"{_clean(change['change']):+g} {change['unit']}"
+            if change.get("change") is not None
+            else "数据不足"
+        )
+        lines.append(
+            f"| {change['label']} | {_clean(change['first'])} {change['unit']} "
+            f"({change['first_date']}) | {_clean(change['latest'])} {change['unit']} "
+            f"({change['latest_date']}) | {delta} | {change['measurement_days']} |"
+        )
+    if not body_changes:
+        lines.append("| — | — | — | 数据不足 | 0 |")
+
+    lines.extend(["", "## 铁与钙时序记录", ""])
+    timing_counts = tracking.get("iron_calcium_status_counts", {})
+    if timing_counts:
+        for status, count in timing_counts.items():
+            lines.append(f"- {IRON_CALCIUM_LABELS.get(status, status)}：{count} 天")
+    else:
+        lines.append("- 尚无记录")
 
     lines.extend(
         [
@@ -287,6 +409,88 @@ def render_html(summary: dict[str, Any]) -> str:
         )
     if not target_rows:
         target_rows.append('<tr><td colspan="6">尚无目标判断</td></tr>')
+    tracking = summary.get("tracking", {})
+    observation_rows = []
+    for average in tracking.get("observation_averages", {}).values():
+        estimate = (
+            display_interval(average["low"], average["high"], average["unit"])
+            if average.get("low") is not None and average.get("high") is not None
+            else "未记录"
+        )
+        observation_rows.append(
+            "<tr>"
+            f"<td>{html.escape(average['label'])}</td>"
+            f"<td>{html.escape(estimate)}</td>"
+            f"<td>{average['logged_days']}</td>"
+            f"<td>{average['complete_days']}</td>"
+            f"<td>{html.escape(average['target'])}</td>"
+            "</tr>"
+        )
+    if not observation_rows:
+        observation_rows.append('<tr><td colspan="5">尚无扩展指标记录</td></tr>')
+
+    protein = tracking.get("meal_protein", {})
+    protein_rows = []
+    for meal in protein.get("meals", []):
+        protein_rows.append(
+            "<tr>"
+            f"<td>{html.escape(meal['date'])}</td>"
+            f"<td>{html.escape(str(meal['label']))}</td>"
+            f"<td>{html.escape(str(meal['time'] or '—'))}</td>"
+            f"<td>{html.escape(display_interval(meal['low'], meal['high'], meal['unit']))}</td>"
+            f"<td>{html.escape(meal['status'])}</td>"
+            "</tr>"
+        )
+    if not protein_rows:
+        protein_rows.append('<tr><td colspan="5">尚无餐次记录</td></tr>')
+    protein_target = protein.get("target_g", [20, 40])
+    protein_counts = protein.get("counts", {})
+    protein_note = (
+        f"参考 {display_interval(protein_target[0], protein_target[1], 'g')}；"
+        f"目标适用 {protein.get('applicable_meals', 0)}/"
+        f"{protein.get('observed_meals', 0)} 餐；"
+        f"目标内 {protein_counts.get('目标内', 0)} 餐，"
+        f"低于参考 {protein_counts.get('低于参考', 0)} 餐，"
+        f"高于参考 {protein_counts.get('高于参考', 0)} 餐，"
+        f"区间重叠 {protein_counts.get('区间重叠', 0)} 餐。"
+    )
+
+    frequency_rows = []
+    for frequency in tracking.get("meal_frequencies", {}).values():
+        frequency_rows.append(
+            "<tr>"
+            f"<td>{html.escape(frequency['label'])}</td>"
+            f"<td>{frequency['confirmed_meals']}</td>"
+            f"<td>{frequency['confirmed_meals_per_week']}/周</td>"
+            f"<td>{frequency['complete_days']}</td>"
+            f"<td>{frequency['partial_days']}</td>"
+            f"<td>{frequency['unknown_days']}</td>"
+            "</tr>"
+        )
+
+    body_rows = []
+    for change in tracking.get("body_changes", {}).values():
+        delta = (
+            f"{_clean(change['change']):+g} {change['unit']}"
+            if change.get("change") is not None
+            else "数据不足"
+        )
+        body_rows.append(
+            "<tr>"
+            f"<td>{html.escape(change['label'])}</td>"
+            f"<td>{_clean(change['first'])} {html.escape(change['unit'])}<br><span class=\"muted\">{html.escape(change['first_date'])}</span></td>"
+            f"<td>{_clean(change['latest'])} {html.escape(change['unit'])}<br><span class=\"muted\">{html.escape(change['latest_date'])}</span></td>"
+            f"<td>{html.escape(delta)}</td>"
+            f"<td>{change['measurement_days']}</td>"
+            "</tr>"
+        )
+    if not body_rows:
+        body_rows.append('<tr><td colspan="5">尚无体重或围度测量</td></tr>')
+
+    timing_items = "".join(
+        f"<li>{html.escape(IRON_CALCIUM_LABELS.get(status, status))}<strong>{count} 天</strong></li>"
+        for status, count in tracking.get("iron_calcium_status_counts", {}).items()
+    ) or "<li>尚无记录</li>"
     source_cards = (
         "".join(
             f"<li><code>{html.escape(source)}</code><strong>{count}</strong></li>"
@@ -309,6 +513,11 @@ def render_html(summary: dict[str, Any]) -> str:
 <header><div class="eyebrow">Longitudinal nutrition</div><h1>{period["requested_days"]} 天营养汇总</h1><p>{period["start"]} 至 {period["end"]} · 区间估算，不把中点当成实测值</p></header>
 <section class="metrics"><div class="metric"><span>已记录</span><strong>{period["logged_days"]} / {period["requested_days"]} 天</strong></div><div class="metric"><span>覆盖率</span><strong>{round(period["coverage_ratio"] * 100, 1)}%</strong></div><div class="metric"><span>缺失日期</span><strong>{len(missing)} 天</strong></div></section>
 <section class="panel"><h2>每日平均估算区间</h2><div class="scroll"><table><thead><tr><th>营养素</th><th>日均估算</th><th>有记录天数</th><th>区间趋势</th></tr></thead><tbody>{"".join(average_rows)}</tbody></table></div></section>
+<section class="panel"><h2>饮水、钙与恢复指标</h2><div class="scroll"><table><thead><tr><th>指标</th><th>有记录日均区间</th><th>有记录天数</th><th>完整记录天数</th><th>参考目标</th></tr></thead><tbody>{"".join(observation_rows)}</tbody></table></div></section>
+<section class="panel"><h2>每餐蛋白质</h2><p class="muted">{html.escape(protein_note)}</p><div class="scroll"><table><thead><tr><th>日期</th><th>餐次</th><th>时间</th><th>蛋白质估算</th><th>判断</th></tr></thead><tbody>{"".join(protein_rows)}</tbody></table></div></section>
+<section class="panel"><h2>血红素铁与油性鱼频次</h2><div class="scroll"><table><thead><tr><th>指标</th><th>已确认餐次</th><th>日历周确认下限</th><th>完整标注日</th><th>部分标注日</th><th>未知日</th></tr></thead><tbody>{"".join(frequency_rows)}</tbody></table></div><p class="muted">按报告日历长度折算每周确认下限；覆盖不完整时不能推断真实频次，也不能用频次替代总铁摄入或化验。</p></section>
+<section class="panel"><h2>体重与围度变化</h2><div class="scroll"><table><thead><tr><th>指标</th><th>首次</th><th>最近</th><th>差值</th><th>测量天数</th></tr></thead><tbody>{"".join(body_rows)}</tbody></table></div></section>
+<section class="panel"><h2>铁与钙时序记录</h2><ul class="sources">{timing_items}</ul><p class="muted">普通混合膳食不单独判为冲突；主要检查单独铁剂与钙剂是否同服，高钙食物按铁剂标签或医生要求。</p></section>
 <section class="panel"><h2>每日目标判断次数</h2><div class="scroll"><table><thead><tr><th>营养素</th><th>目标内</th><th>区间重叠</th><th>偏低</th><th>偏高</th><th>可能偏高</th></tr></thead><tbody>{"".join(target_rows)}</tbody></table></div></section>
 <section class="panel"><h2>每日记录</h2><div class="scroll"><table><thead><tr><th>日期</th><th>日型</th><th>热量</th><th>蛋白质</th><th>照片覆盖</th><th>置信度</th></tr></thead><tbody>{"".join(day_rows)}</tbody></table></div></section>
 <section class="panel"><h2>营养估算来源</h2><ul class="sources">{source_cards}</ul></section>

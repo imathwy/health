@@ -13,7 +13,7 @@ flowchart LR
     D --> E[Codex 逐图检查]
     P --> E
     U[可选 USDA 文本查询] --> E
-    E --> F[analysis.json v2]
+    E --> F[analysis.json v3]
     F --> G[runtime: Markdown / JSON]
     F --> W[site: HTML 与网页资产]
     F --> H[本地 SQLite]
@@ -67,12 +67,16 @@ diet dashboard
 
 本地入口是 `site/index.html`。它按“总览 → 健康计划 / 每日饮食 / 长期趋势 → 详细报告”分层，并在一个页面内切换健康与补剂、最近一天、全部日期、7 天和 30 天报告。所有浏览器页面及其专用图片集中在 `site/`；页面不加载外部脚本、字体或图片，“单独打开”可脱离门户查看当前报告。
 
-Schema v2 为每个食物条目分开记录：
+Schema v3 继续为每个食物条目分开记录：
 
 - `evidence.portion_method`：称重、用户说明、包装份量、照片估份或未知；
 - `evidence.nutrition_source`：包装标签、USDA FDC、配方估算、人工录入或未知；
 - `nutrition`：热量、蛋白质、碳水、脂肪、纤维、钠的区间；
 - `optional_nutrients`：仅保存标签或数据库实际支持的糖、钾、钙等，不把缺失值填成零。
+
+它还增加一组有明确证据边界的执行指标：每日直接饮水量、钙摄入、睡眠、咖啡因、训练时长/RPE、蔬菜水果、体重与围度，以及铁/钙补剂时序。每餐蛋白质直接从食物条目汇总；血红素铁和油性鱼按已复核餐次计数。未提供的数据保持 `null`，照片覆盖不完整时频次只是确认下限。
+
+公开模板给 19–50 岁成人设置 1,000 mg 钙、成年男性基础直接饮水 1,700 mL、每餐蛋白质 20–40 g 等参考值；本地档案可覆盖。普通混合膳食不会被标成“铁钙冲突”，主要检查单独铁剂是否与钙剂同服；高钙食物是否需要错开则按铁剂标签或医生要求。指标定义、测量条件和依据见 [追踪指标规则](docs/tracking-metrics.md)。
 
 ## 可选 USDA FoodData Central
 
@@ -101,7 +105,7 @@ diet summary --days 7 --end today
 diet summary --days 30 --end yesterday --agent
 ```
 
-JSON 与 Markdown 位于 `runtime/reports/nutrition/`，无外部资源的静态 HTML 位于 `site/nutrition/`。汇总会列出实际记录天数与缺失日期，只对有记录日期求平均，并分别处理区间上下界。少于 5 个有效日期时明确显示“数据不足”，不推断趋势。
+JSON 与 Markdown 位于 `runtime/reports/nutrition/`，无外部资源的静态 HTML 位于 `site/nutrition/`。汇总会列出实际记录天数与缺失日期，只对有记录日期求平均，并分别处理区间上下界。它同时展示每餐蛋白质分布、血红素铁与油性鱼的确认频次、饮水/钙/恢复指标覆盖、铁钙时序，以及体重和围度差值。少于 5 个有效日期时明确显示“数据不足”，不推断区间趋势。
 
 如果手工复制或批量修改了旧记录：
 
@@ -138,6 +142,8 @@ diet db-status
 │   ├── commands.py              # 用例编排
 │   ├── analysis.py              # 分析 schema、验证与目标比较
 │   ├── nutrition.py             # 营养领域词汇与区间聚合
+│   ├── tracking.py              # 饮水、钙、恢复、体测与餐次派生指标
+│   ├── tracking_summary.py      # 扩展指标的长期聚合与覆盖规则
 │   ├── summary.py               # 长期汇总领域逻辑
 │   ├── workspace.py             # 配置、路径边界与原子文件 I/O
 │   ├── media.py                 # Shortcut、媒体清单与预览
@@ -163,7 +169,7 @@ Git 只应包含代码、文档、示例配置和 Skill。个人档案、照片�
 本项目从现有营养 Skills 借鉴了接口思想，并独立实现了适合照片证据的来源模型；取舍与许可证见 [上游设计审查](docs/upstream-inspirations.md)。
 
 应用代码遵循单向依赖：`cli → commands → domain/adapters`，领域模块
-`analysis / nutrition / summary` 不反向导入文件系统、媒体、网页、SQLite
+`analysis / nutrition / tracking / tracking_summary / summary` 不反向导入文件系统、媒体、网页、SQLite
 或网络适配器。具体职责和依赖图见 [架构](docs/architecture.md)。
 
 ## 许可证

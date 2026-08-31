@@ -6,6 +6,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from healthlog.tracking import tracking_template
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -36,7 +38,7 @@ class CliIntegrationTests(unittest.TestCase):
             }
             (root / "config" / "health_profile.json").write_text(json.dumps(profile))
             analysis = {
-                "schema_version": 2,
+                "schema_version": 3,
                 "date": "2026-01-02",
                 "day_context": {"day_type": "rest", "training_notes": "", "photo_coverage": "partial", "notes": []},
                 "images": [],
@@ -46,6 +48,8 @@ class CliIntegrationTests(unittest.TestCase):
                         "label": "Manual meal",
                         "time": "12:00",
                         "images": [],
+                        "protein_target_applicable": True,
+                        "tracking_tags": ["heme_iron"],
                         "notes": [],
                         "items": [
                             {
@@ -71,9 +75,16 @@ class CliIntegrationTests(unittest.TestCase):
                         ],
                     }
                 ],
+                "tracking": tracking_template(),
                 "assessment": {"summary": [], "strengths": [], "gaps": [], "next_actions": [], "supplement_note": ""},
                 "assumptions": [],
                 "overall_confidence": "medium",
+            }
+            analysis["tracking"]["observations"]["direct_water_ml"] = {
+                "range": [1600, 1800],
+                "source": "user_reported",
+                "coverage": "complete",
+                "notes": [],
             }
             (record_dir / "analysis.json").write_text(json.dumps(analysis))
             environment = dict(os.environ, HEALTHLOG_ROOT=str(root))
@@ -99,6 +110,14 @@ class CliIntegrationTests(unittest.TestCase):
             self.assertTrue((root / "site" / "index.html").is_file())
             self.assertTrue((root / "site" / "daily" / "20260102" / "index.html").is_file())
             self.assertTrue((root / "site" / "nutrition" / "20260102-7d.html").is_file())
+            self.assertIn(
+                "饮水、钙、恢复与训练",
+                (root / "site" / "daily" / "20260102" / "index.html").read_text(),
+            )
+            self.assertIn(
+                "体重与围度变化",
+                (root / "site" / "nutrition" / "20260102-7d.html").read_text(),
+            )
             self.assertFalse(any((root / "data").rglob("*.html")))
             self.assertFalse(any((root / "runtime").rglob("*.html")))
 

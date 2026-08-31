@@ -45,7 +45,13 @@ class LayerBoundaryTests(unittest.TestCase):
             "workspace",
         }
 
-        for module_name in ("analysis", "nutrition", "summary"):
+        for module_name in (
+            "analysis",
+            "nutrition",
+            "tracking",
+            "tracking_summary",
+            "summary",
+        ):
             with self.subTest(module=module_name):
                 self.assertFalse(local_imports(module_name) & adapters)
 

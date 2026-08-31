@@ -27,7 +27,8 @@ This repository separates reusable source from private health data. Never transm
   an exit code. Put workflow behavior in `commands.py`.
 - `commands.py` orchestrates use cases. It may compose domain code and adapters,
   but adapters must not import it.
-- `analysis.py`, `nutrition.py`, and `summary.py` are the domain layer. They must
+- `analysis.py`, `nutrition.py`, `tracking.py`, `tracking_summary.py`, and
+  `summary.py` are the domain layer. They must
   not import CLI, filesystem, media, presentation, network, or SQLite adapters.
 - `workspace.py`, `media.py`, `presentation.py`, `store.py`, and `fdc.py` own
   configuration/filesystem, Photos/preview, static display, SQLite, and USDA
@@ -48,7 +49,7 @@ When the user asks to analyze food for today, yesterday, or a date:
 4. Inspect every manifest preview under `site/daily/YYYYMMDD/assets/`. Classify every asset as `consumed_food`, `possible_food`, or `unrelated`.
 5. Apply `diet_context.food_photo_means_consumed` from the local profile. When true, a food or drink photo confirms some consumption, but it does not establish the amount or that the whole portion was eaten.
 6. Reconstruct meals from timestamps and visual context. Pair before/after photos and count repeated angles or Live Photo pairs once.
-7. Write schema-v2 `analysis.json` with range estimates for calories, protein, carbohydrate, fat, fiber, and sodium. Every item also records `evidence.portion_method` and `evidence.nutrition_source`; optional nutrients are omitted when unknown rather than filled with zero.
+7. Write schema-v3 `analysis.json` with range estimates for calories, protein, carbohydrate, fat, fiber, and sodium. Every item also records `evidence.portion_method` and `evidence.nutrition_source`; every meal has `tracking_tags`; non-photo observations live in the top-level `tracking` block. Optional and tracking values remain null/absent when unknown rather than being filled with zero.
 8. Prefer a visible package label, then a verified matching single-food database record, then a wide recipe estimate. Do not map a mixed cafeteria plate to one USDA item or invent a source after estimating from general knowledge.
 9. Run `./bin/diet render YYYY-MM-DD` and `./bin/diet verify YYYY-MM-DD`. Rendering also syncs the private SQLite index. Fix errors until verification passes.
 10. Run `./bin/diet dashboard` when the unified portal is missing or stale.
@@ -64,3 +65,6 @@ Use the targets and health guardrails from the ignored local profile. Do not inf
 - Use `./bin/diet fdc-search QUERY --agent` and `./bin/diet fdc-food ID --grams LOW:HIGH --agent` only for defensible single-food matches. These commands send text or an ID to USDA; they never send images.
 - Use `./bin/diet rebuild-db` after bulk edits or copying dated analyses.
 - Use `./bin/diet summary --days 7|30 --end DATE` for longitudinal reports. State coverage, never count missing days as zero, and require at least five logged dates before describing interval trends.
+- Per-meal protein is derived from meal items. Count heme-iron and oily-fish
+  frequency only from reviewed meal tags. Never infer direct water, body
+  measurements, sleep, training RPE, or supplement timing from photos.

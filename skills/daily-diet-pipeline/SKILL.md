@@ -1,6 +1,6 @@
 ---
 name: daily-diet-pipeline
-description: Run the repository's local Apple Photos diet workflow for today, yesterday, or a date; create or repair schema-v2 meal analysis with explicit portion and nutrition provenance; render and verify Markdown/HTML; query USDA FoodData Central for suitable single foods; or generate local 7/30-day SQLite summaries. Do not use for unrelated general nutrition questions.
+description: Run the repository's local Apple Photos diet workflow for today, yesterday, or a date; create or repair schema-v3 meal and health tracking with explicit provenance; render and verify Markdown/HTML; query USDA FoodData Central for suitable single foods; or generate local 7/30-day SQLite summaries. Do not use for unrelated general nutrition questions.
 ---
 
 # Daily Diet Pipeline
@@ -25,7 +25,7 @@ Use the repository as the executable source of truth. Find its root by locating 
    `analysis.template.json`.
 4. Inspect every manifest asset through its `preview_path`, which resolves into the private `site/` display tree. If a preview failed, inspect the original with another supported local viewer. Do not sample.
 5. Reconstruct meals from timestamps, before/after pairs, repeated angles, and user statements. Count duplicate views and Live Photo pairs once.
-6. Write schema-v2 `analysis.json`. Every item must include core nutrient ranges, confidence, and `evidence`. Load `references/analysis-schema.md` when authoring or repairing the file.
+6. Write schema-v3 `analysis.json`. Every item must include core nutrient ranges, confidence, and `evidence`; every meal must include `tracking_tags`; the top-level `tracking` block preserves non-photo observations and explicit unknowns. Load `references/analysis-schema.md` when authoring or repairing the file.
 7. Run `./bin/diet render DATE`. This validates the analysis, writes Markdown to `runtime/`, writes standalone HTML to `site/`, and transactionally syncs the private SQLite index.
 8. Run `./bin/diet verify DATE`. Fix errors until it prints `VERIFY=passed`.
 9. Run `./bin/diet dashboard` if the unified local portal is missing or stale.
@@ -57,6 +57,35 @@ Photo recognition establishes likely identity and portion; it is not a nutrient 
 - Use `recipe_estimate` for mixed dishes, cafeteria dishes, or unmatched Chinese foods. Do not map an entire mixed plate to one USDA item.
 - Never invent a database citation after estimating from general knowledge.
 - Explain whether the daily interval is below, overlaps, or exceeds the configured target. Never present a midpoint as measured intake.
+
+## Track decision-relevant health observations
+
+- Derive each meal's protein range from its food items. Do not manually copy a
+  second protein total into `tracking`. Set `protein_target_applicable` true for
+  main meals/protein feedings and false for fruit courses or small snacks; show
+  every meal's protein, but judge the target only when applicable.
+- Tag a meal `heme_iron` only when meat, poultry, fish, or seafood is confirmed.
+  Do not tag eggs or dairy. Tag `oily_fish` only when the species/type is
+  defensible; generic fish remains untagged.
+- Record direct drinking water separately from soup, milk, juice, and food
+  moisture. Water and unsweetened light tea may count. A bottle photo proves the
+  container, not the amount consumed.
+- Estimate calcium only from a visible label or defensible composition source.
+  The renderer can sum item-level `optional_nutrients.calcium_mg`; incomplete
+  food or photo coverage stays `partial`.
+- Never infer weight, waist, chest, arm, thigh, sleep, caffeine timing, training
+  RPE, or supplement timing from an image. Use user-reported, measured,
+  wearable, or package-label data; otherwise keep the field `null`.
+- Treat an exact known zero as `[0, 0]` with complete coverage. Keep unknown as
+  `null`; never fill it with zero for a cleaner report.
+- For iron and calcium, ordinary mixed meals are `food_only`. Record
+  `potential_supplement_overlap` only when separate iron and calcium supplements
+  were taken together. Follow the iron label or clinician instructions for
+  high-calcium foods. If no separate iron supplement is used, select
+  `not_applicable_no_iron_supplement`.
+- If the user has not supplied the non-photo observations, finish the photo
+  analysis with explicit unknowns, then ask one compact follow-up listing only
+  the values that would materially improve the report.
 
 Load `references/nutrition-sources.md` for the decision table and lookup commands.
 
@@ -92,6 +121,9 @@ The report must:
 - average lower bounds and upper bounds separately over logged days;
 - keep photo coverage and confidence visible;
 - show nutrition-source counts;
+- show per-meal protein distribution, confirmed heme-iron/oily-fish meal
+  frequency, calcium/direct-water coverage, iron–calcium timing, and measured
+  body changes;
 - refuse to infer a trend from fewer than five logged days;
 - describe trends from both interval bounds, never from a hidden midpoint;
 - avoid correlations with sleep, training, weight, or symptoms until those variables have enough dated observations.
@@ -119,6 +151,6 @@ The report must:
 ## Completion checks
 
 The job is complete only when every asset was reviewed, duplicates were not
-double counted, each food has source-aware range estimates, both daily reports
-and the unified portal exist, SQLite matches the analysis hash, and
-`./bin/diet verify DATE` prints `VERIFY=passed`.
+double counted, each food has source-aware range estimates, schema-v3 tracking
+uses explicit unknowns, both daily reports and the unified portal exist, SQLite
+matches the analysis hash, and `./bin/diet verify DATE` prints `VERIFY=passed`.

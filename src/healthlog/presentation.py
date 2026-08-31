@@ -16,6 +16,13 @@ from urllib.parse import unquote, urlsplit
 from .analysis import display_range, sum_nutrition
 from .errors import PipelineError
 from .media import manifest_preview_path
+from .tracking import (
+    body_measurement_rows,
+    daily_observation_rows,
+    iron_calcium_row,
+    meal_protein_rows,
+    meal_tag_counts,
+)
 from .workspace import (
     ANALYSIS_NAME,
     MANIFEST_NAME,
@@ -150,6 +157,33 @@ def evidence_label(item: dict[str, Any]) -> str:
     return f"{nutrition_source} + {portion_method}{suffix}"
 
 
+def tracking_source_label(value: Any) -> str:
+    return {
+        "user_reported": "用户记录",
+        "measured": "实测",
+        "photo_review": "照片复核",
+        "derived_from_items": "食物条目汇总",
+        "package_label": "包装标签",
+        "wearable": "穿戴设备",
+        "unknown": "未记录",
+    }.get(str(value), str(value))
+
+
+def tracking_estimate(row: dict[str, Any]) -> str:
+    value = row.get("range")
+    if not isinstance(value, list) or len(value) != 2:
+        return "未记录"
+    suffix = "（覆盖不全）" if row.get("coverage") != "complete" else ""
+    return f"{display_range(value, row['unit'])}{suffix}"
+
+
+def body_value(row: dict[str, Any]) -> str:
+    value = row.get("value")
+    if value is None:
+        return "未记录"
+    return f"{value:g} {row['unit']}" if isinstance(value, float) else f"{value} {row['unit']}"
+
+
 def render_markdown(
     target: date,
     analysis: dict[str, Any],
@@ -158,6 +192,7 @@ def render_markdown(
     comparisons: list[dict[str, str]],
     analysis_link: str,
     paths: WorkspacePaths,
+    profile: dict[str, Any],
 ) -> str:
     day_context = analysis["day_context"]
     assessment = analysis["assessment"]
@@ -166,6 +201,12 @@ def render_markdown(
         asset["file"]: preview_href(asset, manifest, paths, paths.report_md.parent)
         for asset in manifest["assets"]
     }
+    observation_rows = daily_observation_rows(analysis, profile)
+    measurement_rows = body_measurement_rows(analysis)
+    protein_rows = meal_protein_rows(analysis, profile)
+    protein_by_meal = {row["meal_id"]: row for row in protein_rows}
+    tag_counts = meal_tag_counts(analysis)
+    timing = iron_calcium_row(analysis)
 
     lines = [
         f"# {target.isoformat()} 饮食分析",
@@ -191,14 +232,72 @@ def render_markdown(
         for row in comparisons
     )
 
+    lines.extend(
+        [
+            "",
+            "## 饮水、钙、恢复与训练",
+            "",
+            "| 指标 | 当日记录 | 参考目标 | 判断 | 来源 |",
+            "|---|---:|---:|---|---|",
+        ]
+    )
+    lines.extend(
+        f"| {row['label']} | {tracking_estimate(row)} | {row['target']} | "
+        f"{row['status']} | {tracking_source_label(row['source'])} |"
+        for row in observation_rows
+    )
+    last_caffeine = analysis.get("tracking", {}).get("last_caffeine_time")
+    if last_caffeine:
+        lines.append(f"| 最晚咖啡因时间 | {last_caffeine} | 观察项 | 已记录 | 用户记录 |")
+
+    lines.extend(
+        [
+            "",
+            "### 体重与围度",
+            "",
+            "| 指标 | 测量值 | 测量时间 | 条件 | 来源 |",
+            "|---|---:|---|---|---|",
+        ]
+    )
+    for row in measurement_rows:
+        lines.append(
+            f"| {row['label']} | {body_value(row)} | "
+            f"{md_escape(row.get('recorded_at') or '未记录')} | "
+            f"{md_escape(row.get('context') or '未记录')} | "
+            f"{tracking_source_label(row['source'])} |"
+        )
+    meal_tagging = analysis.get("tracking", {}).get("meal_tagging", {})
+    lines.extend(
+        [
+            "",
+            "### 铁与食物频次",
+            "",
+            f"- 已确认血红素铁来源餐次：{tag_counts['heme_iron']} 餐。",
+            f"- 已确认油性鱼餐次：{tag_counts['oily_fish']} 餐。",
+            (
+                "- 餐次标注覆盖："
+                f"{meal_tagging.get('coverage', 'unknown')}；覆盖不完整时仅表示确认下限。"
+            ),
+            f"- 铁与钙时序：{timing['label']}。",
+        ]
+    )
+
     lines.extend(["", "## 逐餐记录", ""])
     for meal in analysis["meals"]:
         meal_time = meal.get("time") or "时间不确定"
+        protein = protein_by_meal[meal["id"]]
+        tags = meal.get("tracking_tags", [])
+        tag_text = "、".join(tags) if tags else "无"
         lines.extend(
             [
                 f"### {meal['label']}（{meal_time}）",
                 "",
                 f"关联图片：{', '.join(f'`{name}`' for name in meal.get('images', [])) or '无'}",
+                (
+                    f"本餐蛋白质：{display_range(protein['range'], 'g')}；"
+                    f"参考 {display_range(protein['target'], 'g')}；{protein['status']}。"
+                ),
+                f"追踪标签：{tag_text}。",
                 "",
                 "| 食物 | 估计份量 | 热量 | 蛋白质 | 碳水 | 脂肪 | 纤维 | 钠 | 证据 | 置信度 |",
                 "|---|---|---:|---:|---:|---:|---:|---:|---|---|",
@@ -325,9 +424,16 @@ def render_html(
     totals: dict[str, list[float]],
     comparisons: list[dict[str, str]],
     paths: WorkspacePaths,
+    profile: dict[str, Any],
 ) -> str:
     assessment = analysis["assessment"]
     image_rows = {row["file"]: row for row in analysis["images"]}
+    observation_rows = daily_observation_rows(analysis, profile)
+    measurement_rows = body_measurement_rows(analysis)
+    protein_rows = meal_protein_rows(analysis, profile)
+    protein_by_meal = {row["meal_id"]: row for row in protein_rows}
+    tag_counts = meal_tag_counts(analysis)
+    timing = iron_calcium_row(analysis)
     comparison_html = "".join(
         "<tr>"
         f"<td>{html.escape(row['label'])}</td>"
@@ -337,9 +443,39 @@ def render_html(
         "</tr>"
         for row in comparisons
     )
+    observation_html = "".join(
+        "<tr>"
+        f"<td>{html.escape(row['label'])}</td>"
+        f"<td>{html.escape(tracking_estimate(row))}</td>"
+        f"<td>{html.escape(row['target'])}</td>"
+        f'<td><span class="pill {status_class(row["status"])}">{html.escape(row["status"])}</span></td>'
+        f"<td>{html.escape(tracking_source_label(row['source']))}</td>"
+        "</tr>"
+        for row in observation_rows
+    )
+    last_caffeine = analysis.get("tracking", {}).get("last_caffeine_time")
+    if last_caffeine:
+        observation_html += (
+            "<tr><td>最晚咖啡因时间</td>"
+            f"<td>{html.escape(str(last_caffeine))}</td>"
+            "<td>观察项</td><td><span class=\"pill uncertain\">已记录</span></td>"
+            "<td>用户记录</td></tr>"
+        )
+    measurement_html = "".join(
+        "<tr>"
+        f"<td>{html.escape(row['label'])}</td>"
+        f"<td>{html.escape(body_value(row))}</td>"
+        f"<td>{html.escape(str(row.get('recorded_at') or '未记录'))}</td>"
+        f"<td>{html.escape(str(row.get('context') or '未记录'))}</td>"
+        f"<td>{html.escape(tracking_source_label(row['source']))}</td>"
+        "</tr>"
+        for row in measurement_rows
+    )
 
     meal_sections: list[str] = []
     for meal in analysis["meals"]:
+        meal_protein = protein_by_meal[meal["id"]]
+        meal_tags = "、".join(meal.get("tracking_tags", [])) or "无"
         item_rows = []
         for item in meal["items"]:
             nutrition = item["nutrition"]
@@ -357,7 +493,9 @@ def render_html(
         meal_sections.append(
             '<section class="panel">'
             f'<div class="section-head"><div><p class="eyebrow">{html.escape(meal.get("time") or "时间不确定")}</p><h2>{html.escape(meal["label"])}</h2></div>'
-            f'<span class="pill neutral">{len(meal.get("images", []))} 张图片</span></div>'
+            f'<div><span class="pill {status_class(meal_protein["status"])}">蛋白质 {html.escape(display_range(meal_protein["range"], "g"))} · {html.escape(meal_protein["status"])}</span> '
+            f'<span class="pill neutral">{len(meal.get("images", []))} 张图片</span></div></div>'
+            f'<p class="muted">每餐参考 {html.escape(display_range(meal_protein["target"], "g"))}；追踪标签：{html.escape(meal_tags)}。</p>'
             '<div class="table-wrap"><table><thead><tr><th>食物与份量</th><th>热量</th><th>蛋白质</th><th>碳水</th><th>脂肪</th><th>证据</th><th>置信度</th></tr></thead>'
             f"<tbody>{''.join(item_rows)}</tbody></table></div>"
             f"{html_list(meal.get('notes', []), '无额外备注')}"
@@ -433,6 +571,15 @@ def render_html(
     <div class="section-head"><div><p class="eyebrow">Targets</p><h2>营养估算与个人目标</h2></div></div>
     <div class="table-wrap"><table><thead><tr><th>营养素</th><th>照片估算</th><th>个人目标</th><th>判断</th></tr></thead><tbody>{comparison_html}</tbody></table></div>
   </section>
+  <section class="panel">
+    <div class="section-head"><div><p class="eyebrow">Daily tracking</p><h2>饮水、钙、恢复与训练</h2></div></div>
+    <div class="table-wrap"><table><thead><tr><th>指标</th><th>当日记录</th><th>参考目标</th><th>判断</th><th>来源</th></tr></thead><tbody>{observation_html}</tbody></table></div>
+  </section>
+  <section class="panel">
+    <div class="section-head"><div><p class="eyebrow">Body measurements</p><h2>体重与围度</h2></div></div>
+    <div class="table-wrap"><table><thead><tr><th>指标</th><th>测量值</th><th>时间</th><th>条件</th><th>来源</th></tr></thead><tbody>{measurement_html}</tbody></table></div>
+  </section>
+  <section class="panel"><p class="eyebrow">Iron & food frequency</p><h2>铁、钙与食物频次</h2><ul><li>已确认血红素铁来源餐次：{tag_counts['heme_iron']} 餐</li><li>已确认油性鱼餐次：{tag_counts['oily_fish']} 餐</li><li>铁与钙时序：{html.escape(timing['label'])}</li></ul><p class="muted">普通混合膳食不单独判为冲突；餐次覆盖不完整时，频次仅为确认下限。</p></section>
   {"".join(meal_sections)}
   <section class="grid-2">
     <div class="panel"><p class="eyebrow">Assessment</p><h2>主要发现</h2>{html_list(assessment.get("summary"))}<h3>做得好的地方</h3>{html_list(assessment.get("strengths"))}<h3>主要缺口</h3>{html_list(assessment.get("gaps"))}</div>

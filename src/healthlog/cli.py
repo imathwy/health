@@ -30,20 +30,32 @@ from .fdc import (
     normalize_search,
     search_foods,
 )
+from .errors import PipelineError
 from .store import CORE_NUTRIENTS, NutritionStore
 from .summary import json_text as summary_json_text
 from .summary import make_summary, render_html as render_summary_html
 from .summary import render_markdown as render_summary_markdown
+from .workspace import (
+    ANALYSIS_NAME,
+    MANIFEST_NAME,
+    PIPELINE_DIR_NAME,
+    PROFILE_PATH,
+    REPORT_HTML_NAME,
+    ROOT,
+    WorkspacePaths,
+    atomic_write_text,
+    database_path,
+    load_json,
+    load_profile,
+    nutrition_reports_dir,
+    nutrition_site_dir,
+    paths_for,
+    relative_private_path,
+    resolve_date,
+    write_json,
+)
 
 
-DEFAULT_ROOT = Path(__file__).resolve().parents[2]
-ROOT = Path(os.environ.get("HEALTHLOG_ROOT", str(DEFAULT_ROOT))).expanduser().resolve()
-PROFILE_PATH = ROOT / "config" / "health_profile.json"
-PIPELINE_DIR_NAME = "pipeline"
-MANIFEST_NAME = "manifest.json"
-ANALYSIS_NAME = "analysis.json"
-REPORT_MD_NAME = "README.md"
-REPORT_HTML_NAME = "index.html"
 PREVIEW_VERSION = 2
 
 IMAGE_EXTENSIONS = {
@@ -82,10 +94,6 @@ NUTRITION_SOURCE_TYPES = {
     "manual",
     "unknown",
 }
-
-
-class PipelineError(RuntimeError):
-    """A user-facing pipeline error."""
 
 
 class StaticHTMLAudit(HTMLParser):
@@ -149,118 +157,32 @@ def audit_static_html(path: Path) -> tuple[list[str], list[str], StaticHTMLAudit
     return errors, warnings, audit
 
 
-def resolve_date(value: str) -> date:
-    value = value.strip().lower()
-    today = date.today()
-    if value == "today":
-        return today
-    if value == "yesterday":
-        return today - timedelta(days=1)
-    try:
-        parsed = date.fromisoformat(value)
-    except ValueError as exc:
-        raise PipelineError("日期必须是 YYYY-MM-DD、today 或 yesterday") from exc
-    if parsed.isoformat() != value:
-        raise PipelineError("日期必须使用 YYYY-MM-DD 格式")
-    return parsed
 
 
-def load_json(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError as exc:
-        raise PipelineError(f"缺少文件：{path}") from exc
-    except json.JSONDecodeError as exc:
-        raise PipelineError(f"JSON 格式错误：{path}: {exc}") from exc
-    if not isinstance(value, dict):
-        raise PipelineError(f"JSON 顶层必须是对象：{path}")
-    return value
 
 
-def write_json(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = json.dumps(value, ensure_ascii=False, indent=2) + "\n"
-    atomic_write_text(path, payload)
 
 
-def atomic_write_text(path: Path, text: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        "w", encoding="utf-8", dir=path.parent, delete=False
-    ) as handle:
-        handle.write(text)
-        temporary = Path(handle.name)
-    os.replace(temporary, path)
 
 
-def load_profile() -> dict[str, Any]:
-    profile = load_json(PROFILE_PATH)
-    if profile.get("schema_version") != 1:
-        raise PipelineError(f"不支持的健康档案版本：{PROFILE_PATH}")
-    pipeline = profile.get("pipeline")
-    if not isinstance(pipeline, dict):
-        raise PipelineError(f"健康档案缺少 pipeline 对象：{PROFILE_PATH}")
-    legacy_keys = {
-        "daily_directory",
-        "database_path",
-        "nutrition_reports_directory",
-    }.intersection(pipeline)
-    if legacy_keys:
-        joined = ", ".join(sorted(legacy_keys))
-        raise PipelineError(
-            f"健康档案仍使用旧目录字段（{joined}）；"
-            "请改为 daily_records_directory 和 runtime_directory"
-        )
-    return profile
 
 
-def configured_private_path(
-    profile: dict[str, Any], key: str, default: str
-) -> Path:
-    raw = str(profile.get("pipeline", {}).get(key, default))
-    candidate = Path(raw).expanduser()
-    if candidate.is_absolute():
-        resolved = candidate.resolve()
-    else:
-        resolved = (ROOT / candidate).resolve()
-    try:
-        resolved.relative_to(ROOT)
-    except ValueError as exc:
-        raise PipelineError(
-            f"pipeline.{key} 必须位于仓库目录内：{resolved}"
-        ) from exc
-    return resolved
 
 
-def runtime_root(profile: dict[str, Any]) -> Path:
-    return configured_private_path(profile, "runtime_directory", "runtime")
 
 
-def site_root(profile: dict[str, Any]) -> Path:
-    return configured_private_path(profile, "site_directory", "site")
 
 
-def database_path(profile: dict[str, Any]) -> Path:
-    return runtime_root(profile) / "state" / "healthlog.sqlite3"
 
 
-def nutrition_reports_dir(profile: dict[str, Any]) -> Path:
-    return runtime_root(profile) / "reports" / "nutrition"
 
 
-def nutrition_site_dir(profile: dict[str, Any]) -> Path:
-    return site_root(profile) / "nutrition"
 
 
-def relative_private_path(path: Path) -> str:
-    try:
-        return path.resolve().relative_to(ROOT).as_posix()
-    except ValueError:
-        return str(path.resolve())
 
 
 def manifest_preview_path(
-    asset: dict[str, Any], manifest: dict[str, Any], paths: dict[str, Path]
+    asset: dict[str, Any], manifest: dict[str, Any], paths: WorkspacePaths
 ) -> Path | None:
     """Resolve both schema-v3 site paths and legacy runtime-relative previews."""
     raw_path = asset.get("preview_path")
@@ -268,14 +190,14 @@ def manifest_preview_path(
         return None
     candidate = Path(raw_path)
     if int(manifest.get("schema_version", 0)) >= 3:
-        boundary = paths["site_root"].resolve()
+        boundary = paths.site_root.resolve()
         resolved = candidate.resolve() if candidate.is_absolute() else (ROOT / candidate).resolve()
     else:
-        boundary = paths["runtime_day_dir"].resolve()
+        boundary = paths.runtime_day_dir.resolve()
         resolved = (
             candidate.resolve()
             if candidate.is_absolute()
-            else (paths["runtime_day_dir"] / candidate).resolve()
+            else (paths.runtime_day_dir / candidate).resolve()
         )
     try:
         resolved.relative_to(boundary)
@@ -287,7 +209,7 @@ def manifest_preview_path(
 def preview_href(
     asset: dict[str, Any],
     manifest: dict[str, Any],
-    paths: dict[str, Path],
+    paths: WorkspacePaths,
     source_dir: Path,
 ) -> str | None:
     resolved = manifest_preview_path(asset, manifest, paths)
@@ -296,55 +218,6 @@ def preview_href(
     return Path(os.path.relpath(resolved, source_dir)).as_posix()
 
 
-def paths_for(target: date, profile: dict[str, Any]) -> dict[str, Path]:
-    records_root = configured_private_path(
-        profile, "daily_records_directory", "data/daily"
-    )
-    local_runtime_root = runtime_root(profile)
-    local_site_root = site_root(profile)
-    configured_roots = {
-        "pipeline.daily_records_directory": records_root,
-        "pipeline.runtime_directory": local_runtime_root,
-        "pipeline.site_directory": local_site_root,
-    }
-    root_items = list(configured_roots.items())
-    for index, (left_name, left_path) in enumerate(root_items):
-        for right_name, right_path in root_items[index + 1 :]:
-            if (
-                left_path == right_path
-                or left_path in right_path.parents
-                or right_path in left_path.parents
-            ):
-                raise PipelineError(
-                    f"{left_name} 与 {right_name} 必须是互不包含的目录"
-                )
-    daily_runtime_root = local_runtime_root / "daily"
-    daily_site_root = local_site_root / "daily"
-    compact_date = target.strftime("%Y%m%d")
-    record_dir = records_root / compact_date
-    runtime_day_dir = daily_runtime_root / compact_date
-    site_day_dir = daily_site_root / compact_date
-    pipeline_dir = runtime_day_dir / PIPELINE_DIR_NAME
-    return {
-        "records_root": records_root,
-        "record_dir": record_dir,
-        "runtime_root": local_runtime_root,
-        "site_root": local_site_root,
-        "daily_runtime_root": daily_runtime_root,
-        "daily_site_root": daily_site_root,
-        "runtime_day_dir": runtime_day_dir,
-        "site_day_dir": site_day_dir,
-        "pipeline_dir": pipeline_dir,
-        "preview_dir": site_day_dir / "assets",
-        "manifest": pipeline_dir / MANIFEST_NAME,
-        "template": pipeline_dir / "analysis.template.json",
-        "analysis": record_dir / ANALYSIS_NAME,
-        "report_md": runtime_day_dir / REPORT_MD_NAME,
-        "report_html": site_day_dir / REPORT_HTML_NAME,
-        "daily_index_md": daily_runtime_root / REPORT_MD_NAME,
-        "daily_index_html": daily_site_root / REPORT_HTML_NAME,
-        "dashboard": local_site_root / REPORT_HTML_NAME,
-    }
 
 
 def run_shortcut(
@@ -539,11 +412,11 @@ def make_video_preview(source: Path, destination: Path) -> tuple[str | None, str
 
 def build_manifest(
     target: date,
-    paths: dict[str, Path],
+    paths: WorkspacePaths,
     shortcut_result: dict[str, Any],
 ) -> dict[str, Any]:
-    record_dir = paths["record_dir"]
-    preview_dir = paths["preview_dir"]
+    record_dir = paths.record_dir
+    preview_dir = paths.preview_dir
     preview_dir.mkdir(parents=True, exist_ok=True)
 
     files = media_files(record_dir)
@@ -594,8 +467,8 @@ def build_manifest(
         "generated_at": datetime.now().astimezone().isoformat(),
         "root": str(ROOT),
         "record_directory": str(record_dir),
-        "runtime_directory": str(paths["runtime_day_dir"]),
-        "site_directory": str(paths["site_day_dir"]),
+        "runtime_directory": str(paths.runtime_day_dir),
+        "site_directory": str(paths.site_day_dir),
         "shortcut": shortcut_result,
         "asset_count": len(assets),
         "preview_count": sum(bool(asset["preview_path"]) for asset in assets),
@@ -641,9 +514,9 @@ def prepare(args: argparse.Namespace) -> int:
     profile = load_profile()
     target = resolve_date(args.date)
     paths = paths_for(target, profile)
-    paths["record_dir"].mkdir(parents=True, exist_ok=True)
-    paths["runtime_day_dir"].mkdir(parents=True, exist_ok=True)
-    paths["site_day_dir"].mkdir(parents=True, exist_ok=True)
+    paths.record_dir.mkdir(parents=True, exist_ok=True)
+    paths.runtime_day_dir.mkdir(parents=True, exist_ok=True)
+    paths.site_day_dir.mkdir(parents=True, exist_ok=True)
 
     shortcut_name = args.shortcut or profile["pipeline"]["shortcut_name"]
     if args.skip_export:
@@ -660,20 +533,20 @@ def prepare(args: argparse.Namespace) -> int:
             target,
             shortcut_name,
             args.timeout,
-            paths["record_dir"],
+            paths.record_dir,
         )
 
     manifest = build_manifest(target, paths, shortcut_result)
-    write_json(paths["manifest"], manifest)
+    write_json(paths.manifest, manifest)
     template = analysis_template(target, manifest)
-    write_json(paths["template"], template)
+    write_json(paths.template, template)
 
-    if args.reset_analysis or not paths["analysis"].exists():
-        write_json(paths["analysis"], template)
+    if args.reset_analysis or not paths.analysis.exists():
+        write_json(paths.analysis, template)
         analysis_state = "created"
     else:
         analysis_state = "preserved"
-        existing = load_json(paths["analysis"])
+        existing = load_json(paths.analysis)
         manifest_files = {asset["file"] for asset in manifest["assets"]}
         analysis_files = {
             row.get("file")
@@ -684,13 +557,13 @@ def prepare(args: argparse.Namespace) -> int:
             analysis_state = "preserved-needs-sync"
 
     print(f"DATE={target.isoformat()}")
-    print(f"RECORD_DIR={paths['record_dir']}")
-    print(f"RUNTIME_DIR={paths['runtime_day_dir']}")
-    print(f"SITE_DIR={paths['site_day_dir']}")
+    print(f"RECORD_DIR={paths.record_dir}")
+    print(f"RUNTIME_DIR={paths.runtime_day_dir}")
+    print(f"SITE_DIR={paths.site_day_dir}")
     print(f"ASSETS={manifest['asset_count']}")
     print(f"PREVIEWS={manifest['preview_count']}")
-    print(f"MANIFEST={paths['manifest']}")
-    print(f"ANALYSIS={paths['analysis']}")
+    print(f"MANIFEST={paths.manifest}")
+    print(f"ANALYSIS={paths.analysis}")
     print(f"ANALYSIS_STATE={analysis_state}")
     if manifest["preview_count"] != manifest["asset_count"]:
         print("WARNING=部分媒体没有预览；查看 manifest.json 的 preview_error")
@@ -1037,14 +910,14 @@ def render_markdown(
     totals: dict[str, list[float]],
     comparisons: list[dict[str, str]],
     analysis_link: str,
-    paths: dict[str, Path],
+    paths: WorkspacePaths,
 ) -> str:
     day_context = analysis["day_context"]
     assessment = analysis["assessment"]
     image_by_file = {row["file"]: row for row in analysis["images"]}
     preview_by_file = {
         asset["file"]: preview_href(
-            asset, manifest, paths, paths["report_md"].parent
+            asset, manifest, paths, paths.report_md.parent
         )
         for asset in manifest["assets"]
     }
@@ -1202,7 +1075,7 @@ def render_html(
     manifest: dict[str, Any],
     totals: dict[str, list[float]],
     comparisons: list[dict[str, str]],
-    paths: dict[str, Path],
+    paths: WorkspacePaths,
 ) -> str:
     assessment = analysis["assessment"]
     image_rows = {row["file"]: row for row in analysis["images"]}
@@ -1246,7 +1119,7 @@ def render_html(
     for asset in manifest["assets"]:
         record = image_rows[asset["file"]]
         preview = preview_href(
-            asset, manifest, paths, paths["report_html"].parent
+            asset, manifest, paths, paths.report_html.parent
         )
         if preview:
             media = f"<img src=\"{html.escape(preview, quote=True)}\" alt=\"{html.escape(asset['file'], quote=True)}\" loading=\"lazy\">"
@@ -1327,10 +1200,10 @@ def render_html(
 """
 
 
-def rendered_entry(paths: dict[str, Path]) -> dict[str, Any] | None:
-    analysis_path = paths["analysis"]
-    runtime_day_dir = paths["runtime_day_dir"]
-    if not analysis_path.exists() or not paths["report_html"].exists():
+def rendered_entry(paths: WorkspacePaths) -> dict[str, Any] | None:
+    analysis_path = paths.analysis
+    runtime_day_dir = paths.runtime_day_dir
+    if not analysis_path.exists() or not paths.report_html.exists():
         return None
     try:
         analysis = load_json(analysis_path)
@@ -1350,8 +1223,8 @@ def rendered_entry(paths: dict[str, Path]) -> dict[str, Any] | None:
 
 def update_daily_indexes(profile: dict[str, Any]) -> None:
     paths = paths_for(date.today(), profile)
-    daily_runtime_root = paths["daily_runtime_root"]
-    daily_site_root = paths["daily_site_root"]
+    daily_runtime_root = paths.daily_runtime_root
+    daily_site_root = paths.daily_site_root
     daily_runtime_root.mkdir(parents=True, exist_ok=True)
     daily_site_root.mkdir(parents=True, exist_ok=True)
     entries = []
@@ -1401,14 +1274,14 @@ def newest_report(report_dir: Path, suffix: str) -> Path | None:
 
 def update_dashboard(profile: dict[str, Any]) -> Path:
     paths = paths_for(date.today(), profile)
-    local_site_root = paths["site_root"]
+    local_site_root = paths.site_root
     local_site_root.mkdir(parents=True, exist_ok=True)
-    dashboard_path = paths["dashboard"]
+    dashboard_path = paths.dashboard
 
     daily_dirs = sorted(
         (
             path
-            for path in paths["daily_site_root"].glob("[0-9]" * 8)
+            for path in paths.daily_site_root.glob("[0-9]" * 8)
             if path.is_dir() and (path / REPORT_HTML_NAME).is_file()
         ),
         reverse=True,
@@ -1422,7 +1295,7 @@ def update_dashboard(profile: dict[str, Any]) -> Path:
 
     report_dir = nutrition_site_dir(profile)
     supplement_report = local_site_root / "health" / "index.html"
-    daily_index = paths["daily_index_html"]
+    daily_index = paths.daily_index_html
     seven_day = newest_report(report_dir, "7d")
     thirty_day = newest_report(report_dir, "30d")
 
@@ -1463,7 +1336,7 @@ def update_dashboard(profile: dict[str, Any]) -> Path:
         "最近一天",
         f"{latest_entry['date']} 饮食分析" if latest_entry else "最近一天饮食分析",
         "逐餐估算、目标比较、照片证据与不确定性。",
-        latest_daily_paths["report_html"] if latest_daily_paths else None,
+        latest_daily_paths.report_html if latest_daily_paths else None,
     )
     add_view(
         "daily",
@@ -1619,17 +1492,17 @@ def update_dashboard(profile: dict[str, Any]) -> Path:
 
 def load_analysis_bundle(
     target: date, profile: dict[str, Any]
-) -> tuple[dict[str, Path], dict[str, Any], dict[str, Any]]:
+) -> tuple[WorkspacePaths, dict[str, Any], dict[str, Any]]:
     paths = paths_for(target, profile)
-    manifest = load_json(paths["manifest"])
-    analysis = load_json(paths["analysis"])
+    manifest = load_json(paths.manifest)
+    analysis = load_json(paths.analysis)
     return paths, manifest, analysis
 
 
 def sync_analysis_to_store(
     *,
     profile: dict[str, Any],
-    paths: dict[str, Path],
+    paths: WorkspacePaths,
     manifest: dict[str, Any],
     analysis: dict[str, Any],
     totals: dict[str, list[float]],
@@ -1640,8 +1513,8 @@ def sync_analysis_to_store(
         store.upsert_day(
             analysis=analysis,
             manifest=manifest,
-            analysis_path=relative_private_path(paths["analysis"]),
-            analysis_sha256=sha256_file(paths["analysis"]),
+            analysis_path=relative_private_path(paths.analysis),
+            analysis_sha256=sha256_file(paths.analysis),
             totals=totals,
             targets=profile.get("targets", {}),
             comparisons=comparisons,
@@ -1667,12 +1540,12 @@ def render(args: argparse.Namespace) -> int:
         profile,
         totals,
         comparisons,
-        Path(os.path.relpath(paths["analysis"], paths["report_md"].parent)).as_posix(),
+        Path(os.path.relpath(paths.analysis, paths.report_md.parent)).as_posix(),
         paths,
     )
     page = render_html(target, analysis, manifest, totals, comparisons, paths)
-    atomic_write_text(paths["report_md"], markdown)
-    atomic_write_text(paths["report_html"], page)
+    atomic_write_text(paths.report_md, markdown)
+    atomic_write_text(paths.report_html, page)
     update_daily_indexes(profile)
     dashboard_path = update_dashboard(profile)
     db_path = sync_analysis_to_store(
@@ -1685,8 +1558,8 @@ def render(args: argparse.Namespace) -> int:
     )
 
     print(f"DATE={target.isoformat()}")
-    print(f"REPORT_MD={paths['report_md']}")
-    print(f"REPORT_HTML={paths['report_html']}")
+    print(f"REPORT_MD={paths.report_md}")
+    print(f"REPORT_HTML={paths.report_html}")
     print(f"DASHBOARD={dashboard_path}")
     print(f"DATABASE={db_path}")
     print("DATABASE_STATUS=synced")
@@ -1703,7 +1576,7 @@ def verify(args: argparse.Namespace) -> int:
     paths, manifest, analysis = load_analysis_bundle(target, profile)
     errors, warnings = validate_analysis(analysis, manifest)
 
-    record_dir = paths["record_dir"]
+    record_dir = paths.record_dir
     for asset in manifest.get("assets", []):
         source = record_dir / asset["relative_path"]
         if not source.exists():
@@ -1724,16 +1597,16 @@ def verify(args: argparse.Namespace) -> int:
         else:
             warnings.append(f"没有预览：{source.name}")
 
-    for report_path in (paths["report_md"], paths["report_html"]):
+    for report_path in (paths.report_md, paths.report_html):
         if not report_path.exists() or report_path.stat().st_size == 0:
             errors.append(f"报告缺失：{report_path}")
         elif target.isoformat() not in report_path.read_text(encoding="utf-8"):
             errors.append(f"报告没有包含日期：{report_path}")
 
     for index_path in (
-        paths["daily_index_md"],
-        paths["daily_index_html"],
-        paths["dashboard"],
+        paths.daily_index_md,
+        paths.daily_index_html,
+        paths.dashboard,
     ):
         if not index_path.exists() or index_path.stat().st_size == 0:
             errors.append(f"每日索引缺失：{index_path}")
@@ -1747,7 +1620,7 @@ def verify(args: argparse.Namespace) -> int:
                 db_state = store.day_state(target.isoformat())
             if db_state is None:
                 errors.append(f"营养数据库没有 {target.isoformat()} 记录")
-            elif db_state.get("analysis_sha256") != sha256_file(paths["analysis"]):
+            elif db_state.get("analysis_sha256") != sha256_file(paths.analysis):
                 errors.append("营养数据库记录已过期；重新运行 diet render")
             else:
                 expected_totals = sum_nutrition(analysis)
@@ -1766,16 +1639,16 @@ def verify(args: argparse.Namespace) -> int:
             errors.append(f"营养数据库无法读取：{exc}")
 
     for html_path in (
-        paths["report_html"],
-        paths["daily_index_html"],
-        paths["dashboard"],
+        paths.report_html,
+        paths.daily_index_html,
+        paths.dashboard,
     ):
         if not html_path.exists() or html_path.stat().st_size == 0:
             continue
         html_errors, html_warnings, audit = audit_static_html(html_path)
         errors.extend(html_errors)
         warnings.extend(html_warnings)
-        if html_path == paths["report_html"]:
+        if html_path == paths.report_html:
             expected_images = int(manifest.get("preview_count", 0))
             if audit.image_count != expected_images:
                 errors.append(
@@ -1784,8 +1657,8 @@ def verify(args: argparse.Namespace) -> int:
 
     boundary_roots = {
         (ROOT / "data").resolve(),
-        paths["records_root"].resolve(),
-        paths["runtime_root"].resolve(),
+        paths.records_root.resolve(),
+        paths.runtime_root.resolve(),
     }
     for boundary_root in sorted(boundary_roots):
         if boundary_root.exists():
@@ -1804,9 +1677,9 @@ def verify(args: argparse.Namespace) -> int:
     print(f"DATE={target.isoformat()}")
     print(f"ASSETS={manifest.get('asset_count', 0)}")
     print(f"PREVIEWS={manifest.get('preview_count', 0)}")
-    print(f"REPORT_MD={paths['report_md']}")
-    print(f"REPORT_HTML={paths['report_html']}")
-    print(f"DASHBOARD={paths['dashboard']}")
+    print(f"REPORT_MD={paths.report_md}")
+    print(f"REPORT_HTML={paths.report_html}")
+    print(f"DASHBOARD={paths.dashboard}")
     print(f"DATABASE={db_path}")
     for warning in sorted(set(warnings)):
         print(f"WARNING={warning}")
@@ -1817,27 +1690,27 @@ def status(args: argparse.Namespace) -> int:
     profile = load_profile()
     target = resolve_date(args.date)
     paths = paths_for(target, profile)
-    media = media_files(paths["record_dir"])
+    media = media_files(paths.record_dir)
     print(f"DATE={target.isoformat()}")
     print(
-        f"RECORD_DIR={'ready' if paths['record_dir'].exists() else 'missing'}:"
-        f"{paths['record_dir']}"
+        f"RECORD_DIR={'ready' if paths.record_dir.exists() else 'missing'}:"
+        f"{paths.record_dir}"
     )
     print(
-        f"RUNTIME_DIR={'ready' if paths['runtime_day_dir'].exists() else 'missing'}:"
-        f"{paths['runtime_day_dir']}"
+        f"RUNTIME_DIR={'ready' if paths.runtime_day_dir.exists() else 'missing'}:"
+        f"{paths.runtime_day_dir}"
     )
     print(
-        f"SITE_DIR={'ready' if paths['site_day_dir'].exists() else 'missing'}:"
-        f"{paths['site_day_dir']}"
+        f"SITE_DIR={'ready' if paths.site_day_dir.exists() else 'missing'}:"
+        f"{paths.site_day_dir}"
     )
     print(f"MEDIA={len(media)}")
-    print(f"MANIFEST={'ready' if paths['manifest'].exists() else 'missing'}")
-    print(f"ANALYSIS={'ready' if paths['analysis'].exists() else 'missing'}")
-    print(f"REPORT_MD={'ready' if paths['report_md'].exists() else 'missing'}")
-    print(f"REPORT_HTML={'ready' if paths['report_html'].exists() else 'missing'}")
+    print(f"MANIFEST={'ready' if paths.manifest.exists() else 'missing'}")
+    print(f"ANALYSIS={'ready' if paths.analysis.exists() else 'missing'}")
+    print(f"REPORT_MD={'ready' if paths.report_md.exists() else 'missing'}")
+    print(f"REPORT_HTML={'ready' if paths.report_html.exists() else 'missing'}")
     print(
-        f"DASHBOARD={'ready' if paths['dashboard'].exists() else 'missing'}"
+        f"DASHBOARD={'ready' if paths.dashboard.exists() else 'missing'}"
     )
     db_path = database_path(profile)
     db_status = "missing"
@@ -1847,7 +1720,7 @@ def status(args: argparse.Namespace) -> int:
                 state = store.day_state(target.isoformat())
             if state is None:
                 db_status = "day-missing"
-            elif paths["analysis"].exists() and state.get("analysis_sha256") != sha256_file(paths["analysis"]):
+            elif paths.analysis.exists() and state.get("analysis_sha256") != sha256_file(paths.analysis):
                 db_status = "stale"
             else:
                 db_status = "ready"
@@ -1879,7 +1752,7 @@ def database_status(args: argparse.Namespace) -> int:
 
 def rebuild_database(args: argparse.Namespace) -> int:
     profile = load_profile()
-    records_root = paths_for(date.today(), profile)["records_root"]
+    records_root = paths_for(date.today(), profile).records_root
     db_path = database_path(profile)
     with NutritionStore(db_path) as store:
         store.clear_derived_days()
@@ -1898,7 +1771,7 @@ def rebuild_database(args: argparse.Namespace) -> int:
         try:
             target = datetime.strptime(day_dir.name, "%Y%m%d").date()
             paths = paths_for(target, profile)
-            analysis = load_json(paths["analysis"])
+            analysis = load_json(paths.analysis)
             manifest = build_manifest(
                 target,
                 paths,
@@ -1911,8 +1784,8 @@ def rebuild_database(args: argparse.Namespace) -> int:
                     "fields": {},
                 },
             )
-            write_json(paths["manifest"], manifest)
-            write_json(paths["template"], analysis_template(target, manifest))
+            write_json(paths.manifest, manifest)
+            write_json(paths.template, analysis_template(target, manifest))
             errors, _ = validate_analysis(analysis, manifest)
             if errors:
                 skipped.append({"date": target.isoformat(), "reason": "; ".join(errors)})
@@ -2251,9 +2124,9 @@ def doctor(_: argparse.Namespace) -> int:
         shortcut_name = profile["pipeline"]["shortcut_name"]
         paths = paths_for(date.today(), profile)
         print(f"SHORTCUT_NAME={shortcut_name}")
-        print(f"RECORDS_DIR={paths['records_root']}")
-        print(f"RUNTIME_DIR={paths['runtime_root']}")
-        print(f"SITE_DIR={paths['site_root']}")
+        print(f"RECORDS_DIR={paths.records_root}")
+        print(f"RUNTIME_DIR={paths.runtime_root}")
+        print(f"SITE_DIR={paths.site_root}")
         db_path = database_path(profile)
         with NutritionStore(db_path) as store:
             stats = store.database_stats()

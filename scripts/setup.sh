@@ -54,6 +54,9 @@ fi
   "$project_root/runtime/daily" \
   "$project_root/runtime/reports/nutrition" \
   "$project_root/runtime/state" \
+  "$project_root/site/daily" \
+  "$project_root/site/health/assets" \
+  "$project_root/site/nutrition" \
   "$project_root/build/shortcuts"
 
 if [[ ! -f "$project_root/config/health_profile.json" ]]; then

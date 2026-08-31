@@ -31,6 +31,7 @@ class CliIntegrationTests(unittest.TestCase):
                     "shortcut_name": "test",
                     "daily_records_directory": "data/daily",
                     "runtime_directory": "runtime",
+                    "site_directory": "site",
                 },
             }
             (root / "config" / "health_profile.json").write_text(json.dumps(profile))
@@ -95,9 +96,11 @@ class CliIntegrationTests(unittest.TestCase):
                 self.assertEqual(completed.returncode, 0, completed.stderr + completed.stdout)
 
             self.assertTrue((root / "runtime" / "state" / "healthlog.sqlite3").is_file())
-            self.assertTrue((root / "runtime" / "index.html").is_file())
-            self.assertTrue((root / "runtime" / "daily" / "20260102" / "index.html").is_file())
-            self.assertTrue((root / "runtime" / "reports" / "nutrition" / "20260102-7d.html").is_file())
+            self.assertTrue((root / "site" / "index.html").is_file())
+            self.assertTrue((root / "site" / "daily" / "20260102" / "index.html").is_file())
+            self.assertTrue((root / "site" / "nutrition" / "20260102-7d.html").is_file())
+            self.assertFalse(any((root / "data").rglob("*.html")))
+            self.assertFalse(any((root / "runtime").rglob("*.html")))
 
             shutil.rmtree(root / "runtime")
             rebuilt = subprocess.run(

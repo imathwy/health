@@ -11,6 +11,10 @@
 /runtime/*
 !/runtime/README.md
 
+# Private local web display
+/site/*
+!/site/README.md
+
 # Legacy root-level paths must never be used
 /daily
 /检查

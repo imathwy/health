@@ -62,6 +62,7 @@
     "shortcut_name": "HealthLog 导出每日照片",
     "daily_records_directory": "data/daily",
     "runtime_directory": "runtime",
+    "site_directory": "site",
     "report_language": "zh-CN"
   }
 }

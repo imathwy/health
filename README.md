@@ -6,11 +6,14 @@ Local HealthLog 是一套 macOS 本地优先的饮食记录流水线：Apple Sho
 flowchart LR
     A[日期] --> B[Apple Photos Shortcut]
     B --> C[本地原图]
-    C --> D[runtime 中的清单与 JPEG 预览]
+    C --> D[runtime 中的清单]
+    C --> P[site 中的网页预览]
     D --> E[Codex 逐图检查]
+    P --> E
     U[可选 USDA 文本查询] --> E
     E --> F[analysis.json v2]
-    F --> G[每日 Markdown / HTML]
+    F --> G[runtime: Markdown / JSON]
+    F --> W[site: HTML 与网页资产]
     F --> H[本地 SQLite]
     H --> I[7 / 30 天汇总]
 ```
@@ -30,7 +33,7 @@ cd local-healthlog
 脚本会：
 
 - 从安全模板创建被忽略的 `config/health_profile.json`；
-- 创建长期记录目录 `data/` 与可重建产物目录 `runtime/`；
+- 创建长期记录目录 `data/`、机器运行目录 `runtime/` 与网页展示目录 `site/`；
 - 可选安装 `diet` 与 Codex Skill 的用户级链接；
 - 为当前 clone 的绝对路径构建并签名 Shortcut；
 - 初始化私有 SQLite 并运行环境检查。
@@ -58,9 +61,9 @@ diet status yesterday
 diet dashboard
 ```
 
-`diet yesterday` 是 `diet prepare yesterday` 的缩写。Shortcut 只能直接写入 `data/daily/YYYYMMDD/`；CLI 会拒绝根目录别名或符号链接返回的路径。`render` 同时完成每日 Markdown/HTML、统一门户和 SQLite 同步；`verify` 会检查原图哈希、预览、schema、静态链接、报告、门户和数据库哈希。
+`diet yesterday` 是 `diet prepare yesterday` 的缩写。Shortcut 只能直接写入 `data/daily/YYYYMMDD/`；CLI 会拒绝根目录别名或符号链接返回的路径。`render` 将 Markdown 写入 `runtime/`、HTML 与网页图片写入 `site/`，并同步统一门户和 SQLite；`verify` 会检查原图哈希、预览、schema、静态链接、目录边界、报告、门户和数据库哈希。
 
-本地入口是 `runtime/index.html`。它按“总览 → 健康计划 / 每日饮食 / 长期趋势 → 详细报告”分层，并在一个页面内切换健康与补剂、最近一天、全部日期、7 天和 30 天报告。页面不加载外部脚本、字体或图片；“单独打开”可脱离门户查看当前报告。
+本地入口是 `site/index.html`。它按“总览 → 健康计划 / 每日饮食 / 长期趋势 → 详细报告”分层，并在一个页面内切换健康与补剂、最近一天、全部日期、7 天和 30 天报告。所有浏览器页面及其专用图片集中在 `site/`；页面不加载外部脚本、字体或图片，“单独打开”可脱离门户查看当前报告。
 
 Schema v2 为每个食物条目分开记录：
 
@@ -96,7 +99,7 @@ diet summary --days 7 --end today
 diet summary --days 30 --end yesterday --agent
 ```
 
-输出位于 `runtime/reports/nutrition/`，同时包含 JSON、Markdown 和无外部资源的静态 HTML。汇总会列出实际记录天数与缺失日期，只对有记录日期求平均，并分别处理区间上下界。少于 5 个有效日期时明确显示“数据不足”，不推断趋势。
+JSON 与 Markdown 位于 `runtime/reports/nutrition/`，无外部资源的静态 HTML 位于 `site/nutrition/`。汇总会列出实际记录天数与缺失日期，只对有记录日期求平均，并分别处理区间上下界。少于 5 个有效日期时明确显示“数据不足”，不推断趋势。
 
 如果手工复制或批量修改了旧记录：
 
@@ -120,10 +123,14 @@ diet db-status
 │   ├── medical/
 │   └── supplements/
 ├── runtime/                     # 可删除重建的私有产物、忽略
-│   ├── index.html               # 统一静态健康门户
-│   ├── daily/YYYYMMDD/          # manifest、预览、每日 Markdown/HTML
-│   ├── reports/nutrition/       # 7/30 天汇总
+│   ├── daily/YYYYMMDD/          # manifest、分析模板、每日 Markdown
+│   ├── reports/nutrition/       # 7/30 天 JSON 与 Markdown
 │   └── state/healthlog.sqlite3  # SQLite 索引与 USDA 缓存
+├── site/                        # 私有网页展示层、忽略
+│   ├── index.html               # 统一静态健康门户
+│   ├── health/                  # 健康与补剂 HTML、网页资产
+│   ├── daily/YYYYMMDD/          # 每日 HTML 与 JPEG 预览
+│   └── nutrition/               # 7/30 天 HTML
 ├── src/healthlog/               # 流水线、SQLite、USDA 与汇总代码
 ├── tests/                       # 无个人数据的标准库测试
 ├── scripts/                     # 初始化、Shortcut 构建、隐私检查
@@ -139,6 +146,6 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 scripts/check_privacy.py
 ```
 
-Git 只应包含代码、文档、示例配置和 Skill。个人档案、照片、医疗记录、补剂记录、分析、报告、数据库、USDA 缓存、Shortcut 生成物和密钥都保留在本机。`data/` 是需要备份的私有事实层，`runtime/` 和 `build/` 都可重建；仓库根目录不保留 `daily` 等兼容链接。详见 [隐私边界](docs/privacy.md) 和 [架构](docs/architecture.md)。
+Git 只应包含代码、文档、示例配置和 Skill。个人档案、照片、医疗记录、补剂记录、分析、报告、数据库、USDA 缓存、Shortcut 生成物和密钥都保留在本机。`data/` 是需要备份的私有事实层，`runtime/` 是机器运行层，`site/` 是唯一网页展示层，`build/` 是开发生成层；仓库根目录不保留 `daily` 等兼容链接。详见 [隐私边界](docs/privacy.md) 和 [架构](docs/architecture.md)。
 
 本项目从现有营养 Skills 借鉴了接口思想，并独立实现了适合照片证据的来源模型；取舍与许可证见 [上游设计审查](docs/upstream-inspirations.md)。

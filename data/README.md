@@ -8,7 +8,8 @@ creates these subdirectories:
 - `medical/`: private examination records
 - `supplements/`: private supplement photos and reports
 
-Generated manifests, previews, reports, and SQLite state belong in `runtime/`,
-not here. Do not create root-level aliases such as `daily`. Do not force-add
+Generated manifests, Markdown/JSON, and SQLite state belong in `runtime/`;
+browser-facing HTML and display images belong in `site/`. Do not create
+root-level aliases such as `daily`. Do not force-add
 files from these folders; the pre-commit privacy check rejects them even if
 `.gitignore` is bypassed.

@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MAX_PUBLIC_FILE_BYTES = 1_000_000
 ALLOWED_DATA_FILES = {"data/README.md"}
 ALLOWED_RUNTIME_FILES = {"runtime/README.md"}
+ALLOWED_SITE_FILES = {"site/README.md"}
 FORBIDDEN_EXACT = {
     ".env",
     "config/health_profile.json",
@@ -92,6 +93,8 @@ def audit_path(path: str, payload: bytes) -> list[str]:
         and normalized not in ALLOWED_RUNTIME_FILES
     ):
         errors.append("private runtime directory")
+    if normalized.startswith("site/") and normalized not in ALLOWED_SITE_FILES:
+        errors.append("private display directory")
     if normalized.startswith(FORBIDDEN_PREFIXES):
         errors.append("private or generated directory")
     if suffix in FORBIDDEN_SUFFIXES:

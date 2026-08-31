@@ -23,13 +23,13 @@ Use the repository as the executable source of truth. Find its root by locating 
    `data/daily/YYYYMMDD/analysis.json`, and the generated
    `runtime/daily/YYYYMMDD/pipeline/manifest.json` plus
    `analysis.template.json`.
-4. Inspect every manifest asset through its `preview_path`. If a preview failed, inspect the original with another supported local viewer. Do not sample.
+4. Inspect every manifest asset through its `preview_path`, which resolves into the private `site/` display tree. If a preview failed, inspect the original with another supported local viewer. Do not sample.
 5. Reconstruct meals from timestamps, before/after pairs, repeated angles, and user statements. Count duplicate views and Live Photo pairs once.
 6. Write schema-v2 `analysis.json`. Every item must include core nutrient ranges, confidence, and `evidence`. Load `references/analysis-schema.md` when authoring or repairing the file.
-7. Run `./bin/diet render DATE`. This validates the analysis, writes Markdown and standalone HTML, and transactionally syncs the private SQLite index.
+7. Run `./bin/diet render DATE`. This validates the analysis, writes Markdown to `runtime/`, writes standalone HTML to `site/`, and transactionally syncs the private SQLite index.
 8. Run `./bin/diet verify DATE`. Fix errors until it prints `VERIFY=passed`.
 9. Run `./bin/diet dashboard` if the unified local portal is missing or stale.
-10. Return links to `runtime/index.html`, the dated Markdown and HTML, the
+10. Return links to `site/index.html`, the dated runtime Markdown and site HTML, the
     energy/protein intervals, and the largest uncertainty.
 
 ## Interpret photo evidence
@@ -111,7 +111,7 @@ The report must:
 - Do not use `--reset-analysis` on meaningful work without preserving it.
 - SQLite under `runtime/state/` is derived and rebuildable. The dated
   `analysis.json` under `data/daily/` remains the reviewable canonical record.
-- Keep `config/health_profile.json`, private contents of `data/`, `runtime/`, and
+- Keep `config/health_profile.json`, private contents of `data/`, `runtime/`, `site/`, and
   `build/` out of Git. Never introduce root-level compatibility aliases such as
   `daily`. Run `python3 scripts/check_privacy.py --staged` before committing
   repository changes.

@@ -236,12 +236,20 @@ def runtime_root(profile: dict[str, Any]) -> Path:
     return configured_private_path(profile, "runtime_directory", "runtime")
 
 
+def site_root(profile: dict[str, Any]) -> Path:
+    return configured_private_path(profile, "site_directory", "site")
+
+
 def database_path(profile: dict[str, Any]) -> Path:
     return runtime_root(profile) / "state" / "healthlog.sqlite3"
 
 
 def nutrition_reports_dir(profile: dict[str, Any]) -> Path:
     return runtime_root(profile) / "reports" / "nutrition"
+
+
+def nutrition_site_dir(profile: dict[str, Any]) -> Path:
+    return site_root(profile) / "nutrition"
 
 
 def relative_private_path(path: Path) -> str:
@@ -251,38 +259,91 @@ def relative_private_path(path: Path) -> str:
         return str(path.resolve())
 
 
+def manifest_preview_path(
+    asset: dict[str, Any], manifest: dict[str, Any], paths: dict[str, Path]
+) -> Path | None:
+    """Resolve both schema-v3 site paths and legacy runtime-relative previews."""
+    raw_path = asset.get("preview_path")
+    if not isinstance(raw_path, str) or not raw_path:
+        return None
+    candidate = Path(raw_path)
+    if int(manifest.get("schema_version", 0)) >= 3:
+        boundary = paths["site_root"].resolve()
+        resolved = candidate.resolve() if candidate.is_absolute() else (ROOT / candidate).resolve()
+    else:
+        boundary = paths["runtime_day_dir"].resolve()
+        resolved = (
+            candidate.resolve()
+            if candidate.is_absolute()
+            else (paths["runtime_day_dir"] / candidate).resolve()
+        )
+    try:
+        resolved.relative_to(boundary)
+    except ValueError as exc:
+        raise PipelineError(f"预览路径越过目录边界：{raw_path}") from exc
+    return resolved
+
+
+def preview_href(
+    asset: dict[str, Any],
+    manifest: dict[str, Any],
+    paths: dict[str, Path],
+    source_dir: Path,
+) -> str | None:
+    resolved = manifest_preview_path(asset, manifest, paths)
+    if resolved is None:
+        return None
+    return Path(os.path.relpath(resolved, source_dir)).as_posix()
+
+
 def paths_for(target: date, profile: dict[str, Any]) -> dict[str, Path]:
     records_root = configured_private_path(
         profile, "daily_records_directory", "data/daily"
     )
     local_runtime_root = runtime_root(profile)
-    if (
-        records_root == local_runtime_root
-        or records_root in local_runtime_root.parents
-        or local_runtime_root in records_root.parents
-    ):
-        raise PipelineError(
-            "pipeline.daily_records_directory 与 pipeline.runtime_directory "
-            "必须是互不包含的目录"
-        )
-    daily_output_root = local_runtime_root / "daily"
+    local_site_root = site_root(profile)
+    configured_roots = {
+        "pipeline.daily_records_directory": records_root,
+        "pipeline.runtime_directory": local_runtime_root,
+        "pipeline.site_directory": local_site_root,
+    }
+    root_items = list(configured_roots.items())
+    for index, (left_name, left_path) in enumerate(root_items):
+        for right_name, right_path in root_items[index + 1 :]:
+            if (
+                left_path == right_path
+                or left_path in right_path.parents
+                or right_path in left_path.parents
+            ):
+                raise PipelineError(
+                    f"{left_name} 与 {right_name} 必须是互不包含的目录"
+                )
+    daily_runtime_root = local_runtime_root / "daily"
+    daily_site_root = local_site_root / "daily"
     compact_date = target.strftime("%Y%m%d")
     record_dir = records_root / compact_date
-    output_dir = daily_output_root / compact_date
-    pipeline_dir = output_dir / PIPELINE_DIR_NAME
+    runtime_day_dir = daily_runtime_root / compact_date
+    site_day_dir = daily_site_root / compact_date
+    pipeline_dir = runtime_day_dir / PIPELINE_DIR_NAME
     return {
         "records_root": records_root,
         "record_dir": record_dir,
         "runtime_root": local_runtime_root,
-        "daily_output_root": daily_output_root,
-        "output_dir": output_dir,
+        "site_root": local_site_root,
+        "daily_runtime_root": daily_runtime_root,
+        "daily_site_root": daily_site_root,
+        "runtime_day_dir": runtime_day_dir,
+        "site_day_dir": site_day_dir,
         "pipeline_dir": pipeline_dir,
-        "preview_dir": pipeline_dir / "previews",
+        "preview_dir": site_day_dir / "assets",
         "manifest": pipeline_dir / MANIFEST_NAME,
         "template": pipeline_dir / "analysis.template.json",
         "analysis": record_dir / ANALYSIS_NAME,
-        "report_md": output_dir / REPORT_MD_NAME,
-        "report_html": output_dir / REPORT_HTML_NAME,
+        "report_md": runtime_day_dir / REPORT_MD_NAME,
+        "report_html": site_day_dir / REPORT_HTML_NAME,
+        "daily_index_md": daily_runtime_root / REPORT_MD_NAME,
+        "daily_index_html": daily_site_root / REPORT_HTML_NAME,
+        "dashboard": local_site_root / REPORT_HTML_NAME,
     }
 
 
@@ -482,7 +543,6 @@ def build_manifest(
     shortcut_result: dict[str, Any],
 ) -> dict[str, Any]:
     record_dir = paths["record_dir"]
-    output_dir = paths["output_dir"]
     preview_dir = paths["preview_dir"]
     preview_dir.mkdir(parents=True, exist_ok=True)
 
@@ -509,7 +569,7 @@ def build_manifest(
                 "file": source.name,
                 "relative_path": source.relative_to(record_dir).as_posix(),
                 "preview_path": (
-                    preview_path.relative_to(output_dir).as_posix()
+                    relative_private_path(preview_path)
                     if preview_error is None and preview_path.exists()
                     else None
                 ),
@@ -529,12 +589,13 @@ def build_manifest(
         )
 
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "date": target.isoformat(),
         "generated_at": datetime.now().astimezone().isoformat(),
         "root": str(ROOT),
         "record_directory": str(record_dir),
-        "output_directory": str(output_dir),
+        "runtime_directory": str(paths["runtime_day_dir"]),
+        "site_directory": str(paths["site_day_dir"]),
         "shortcut": shortcut_result,
         "asset_count": len(assets),
         "preview_count": sum(bool(asset["preview_path"]) for asset in assets),
@@ -581,7 +642,8 @@ def prepare(args: argparse.Namespace) -> int:
     target = resolve_date(args.date)
     paths = paths_for(target, profile)
     paths["record_dir"].mkdir(parents=True, exist_ok=True)
-    paths["output_dir"].mkdir(parents=True, exist_ok=True)
+    paths["runtime_day_dir"].mkdir(parents=True, exist_ok=True)
+    paths["site_day_dir"].mkdir(parents=True, exist_ok=True)
 
     shortcut_name = args.shortcut or profile["pipeline"]["shortcut_name"]
     if args.skip_export:
@@ -623,7 +685,8 @@ def prepare(args: argparse.Namespace) -> int:
 
     print(f"DATE={target.isoformat()}")
     print(f"RECORD_DIR={paths['record_dir']}")
-    print(f"OUTPUT_DIR={paths['output_dir']}")
+    print(f"RUNTIME_DIR={paths['runtime_day_dir']}")
+    print(f"SITE_DIR={paths['site_day_dir']}")
     print(f"ASSETS={manifest['asset_count']}")
     print(f"PREVIEWS={manifest['preview_count']}")
     print(f"MANIFEST={paths['manifest']}")
@@ -974,12 +1037,16 @@ def render_markdown(
     totals: dict[str, list[float]],
     comparisons: list[dict[str, str]],
     analysis_link: str,
+    paths: dict[str, Path],
 ) -> str:
     day_context = analysis["day_context"]
     assessment = analysis["assessment"]
     image_by_file = {row["file"]: row for row in analysis["images"]}
     preview_by_file = {
-        asset["file"]: asset.get("preview_path") for asset in manifest["assets"]
+        asset["file"]: preview_href(
+            asset, manifest, paths, paths["report_md"].parent
+        )
+        for asset in manifest["assets"]
     }
 
     lines = [
@@ -1135,6 +1202,7 @@ def render_html(
     manifest: dict[str, Any],
     totals: dict[str, list[float]],
     comparisons: list[dict[str, str]],
+    paths: dict[str, Path],
 ) -> str:
     assessment = analysis["assessment"]
     image_rows = {row["file"]: row for row in analysis["images"]}
@@ -1177,7 +1245,9 @@ def render_html(
     gallery_cards: list[str] = []
     for asset in manifest["assets"]:
         record = image_rows[asset["file"]]
-        preview = asset.get("preview_path")
+        preview = preview_href(
+            asset, manifest, paths, paths["report_html"].parent
+        )
         if preview:
             media = f"<img src=\"{html.escape(preview, quote=True)}\" alt=\"{html.escape(asset['file'], quote=True)}\" loading=\"lazy\">"
         else:
@@ -1259,7 +1329,7 @@ def render_html(
 
 def rendered_entry(paths: dict[str, Path]) -> dict[str, Any] | None:
     analysis_path = paths["analysis"]
-    output_dir = paths["output_dir"]
+    runtime_day_dir = paths["runtime_day_dir"]
     if not analysis_path.exists() or not paths["report_html"].exists():
         return None
     try:
@@ -1269,8 +1339,8 @@ def rendered_entry(paths: dict[str, Path]) -> dict[str, Any] | None:
         return None
     summary = analysis.get("assessment", {}).get("summary", [])
     return {
-        "date": analysis.get("date", output_dir.name),
-        "dir": output_dir.name,
+        "date": analysis.get("date", runtime_day_dir.name),
+        "dir": runtime_day_dir.name,
         "kcal": display_range(totals["kcal"], "kcal"),
         "protein": display_range(totals["protein_g"], "g"),
         "confidence": analysis.get("overall_confidence", "unknown"),
@@ -1279,12 +1349,16 @@ def rendered_entry(paths: dict[str, Path]) -> dict[str, Any] | None:
 
 
 def update_daily_indexes(profile: dict[str, Any]) -> None:
-    daily_output_root = paths_for(date.today(), profile)["daily_output_root"]
+    paths = paths_for(date.today(), profile)
+    daily_runtime_root = paths["daily_runtime_root"]
+    daily_site_root = paths["daily_site_root"]
+    daily_runtime_root.mkdir(parents=True, exist_ok=True)
+    daily_site_root.mkdir(parents=True, exist_ok=True)
     entries = []
-    if daily_output_root.exists():
-        for output_dir in sorted(daily_output_root.iterdir(), reverse=True):
-            if output_dir.is_dir() and re.fullmatch(r"\d{8}", output_dir.name):
-                target = datetime.strptime(output_dir.name, "%Y%m%d").date()
+    if daily_site_root.exists():
+        for site_day_dir in sorted(daily_site_root.iterdir(), reverse=True):
+            if site_day_dir.is_dir() and re.fullmatch(r"\d{8}", site_day_dir.name):
+                target = datetime.strptime(site_day_dir.name, "%Y%m%d").date()
                 entry = rendered_entry(paths_for(target, profile))
                 if entry:
                     entries.append(entry)
@@ -1304,7 +1378,7 @@ def update_daily_indexes(profile: dict[str, Any]) -> None:
     if not entries:
         md_lines.append("| — | — | — | — | 尚无已完成报告 |")
     md_lines.append("")
-    atomic_write_text(daily_output_root / "README.md", "\n".join(md_lines))
+    atomic_write_text(daily_runtime_root / "README.md", "\n".join(md_lines))
 
     cards = "".join(
         f"<a class=\"card\" href=\"{html.escape(entry['dir'])}/index.html\"><span>{html.escape(entry['date'])}</span><strong>{html.escape(entry['kcal'])}</strong><em>{html.escape(entry['protein'])} 蛋白质</em><p>{html.escape(entry['summary'])}</p></a>"
@@ -1313,7 +1387,7 @@ def update_daily_indexes(profile: dict[str, Any]) -> None:
     page = f"""<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>每日饮食记录</title><style>
 body{{margin:0;background:#f4f2eb;color:#18211b;font:16px/1.6 -apple-system,BlinkMacSystemFont,"PingFang SC",sans-serif}}main{{width:min(980px,calc(100% - 28px));margin:auto;padding:52px 0}}h1{{font-size:clamp(36px,7vw,70px);margin:0 0 8px;letter-spacing:-.05em}}header p{{color:#667169}}.grid{{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:28px}}.card{{display:flex;flex-direction:column;gap:7px;padding:22px;border:1px solid #dfe4dc;border-radius:20px;background:#fffdf8;color:inherit;text-decoration:none;box-shadow:0 10px 30px rgba(30,50,40,.05)}}.card:hover{{transform:translateY(-2px)}}.card span,.card em{{color:#667169;font-style:normal}}.card strong{{font-size:25px}}.card p{{margin:8px 0 0}}@media(max-width:760px){{.grid{{grid-template-columns:1fr}}}}
 </style></head><body><main><header><h1>每日饮食记录</h1><p>从 Apple Photos 到结构化营养估算的本地流水线。</p></header><section class="grid">{cards}</section></main></body></html>"""
-    atomic_write_text(daily_output_root / "index.html", page)
+    atomic_write_text(daily_site_root / "index.html", page)
 
 
 def relative_href(source_dir: Path, target: Path) -> str:
@@ -1327,14 +1401,14 @@ def newest_report(report_dir: Path, suffix: str) -> Path | None:
 
 def update_dashboard(profile: dict[str, Any]) -> Path:
     paths = paths_for(date.today(), profile)
-    local_runtime_root = paths["runtime_root"]
-    local_runtime_root.mkdir(parents=True, exist_ok=True)
-    dashboard_path = local_runtime_root / "index.html"
+    local_site_root = paths["site_root"]
+    local_site_root.mkdir(parents=True, exist_ok=True)
+    dashboard_path = paths["dashboard"]
 
     daily_dirs = sorted(
         (
             path
-            for path in paths["daily_output_root"].glob("[0-9]" * 8)
+            for path in paths["daily_site_root"].glob("[0-9]" * 8)
             if path.is_dir() and (path / REPORT_HTML_NAME).is_file()
         ),
         reverse=True,
@@ -1346,9 +1420,9 @@ def update_dashboard(profile: dict[str, Any]) -> Path:
     )
     latest_entry = rendered_entry(latest_daily_paths) if latest_daily_paths else None
 
-    report_dir = nutrition_reports_dir(profile)
-    supplement_report = ROOT / "data" / "supplements" / "index.html"
-    daily_index = paths["daily_output_root"] / "index.html"
+    report_dir = nutrition_site_dir(profile)
+    supplement_report = local_site_root / "health" / "index.html"
+    daily_index = paths["daily_index_html"]
     seven_day = newest_report(report_dir, "7d")
     thirty_day = newest_report(report_dir, "30d")
 
@@ -1371,7 +1445,7 @@ def update_dashboard(profile: dict[str, Any]) -> Path:
                 "label": label,
                 "title": title,
                 "description": description,
-                "href": relative_href(local_runtime_root, target),
+                "href": relative_href(local_site_root, target),
             }
         )
 
@@ -1480,7 +1554,7 @@ def update_dashboard(profile: dict[str, Any]) -> Path:
       <a class="nav-home active" href="#overview" data-view="overview"><span>总览</span><b aria-hidden="true">⌂</b></a>
       {''.join(nav_groups)}
     </nav>
-    <div class="privacy">仅在本机读取。原始记录位于 data，当前页面和报告位于可重建的 runtime。</div>
+    <div class="privacy">仅在本机读取。原始记录位于 data，机器状态位于 runtime，网页与网页图片统一位于 site。</div>
   </aside>
   <main>
     <div class="topbar"><div><p class="eyebrow">Personal health workspace</p><h1>健康总览</h1></div><span class="status">本地运行</span></div>
@@ -1498,7 +1572,7 @@ def update_dashboard(profile: dict[str, Any]) -> Path:
       </div>
       <div class="layers">
         <article class="layer"><i>1</i><h2>健康计划</h2><p>个人目标、补剂营养表、保留或停用建议及使用方式。</p></article>
-        <article class="layer"><i>2</i><h2>每日证据</h2><p>原始照片留在 data；逐餐估算与图片核对在 runtime 展示。</p></article>
+        <article class="layer"><i>2</i><h2>每日证据</h2><p>原始照片留在 data；内部清单位于 runtime；网页和预览在 site 展示。</p></article>
         <article class="layer"><i>3</i><h2>长期趋势</h2><p>按有记录日期计算 7/30 天区间，不把缺失日当作零。</p></article>
       </div>
       <footer>更新于 {html.escape(generated)} · 个人记录与建议不替代医疗诊断。</footer>
@@ -1593,9 +1667,10 @@ def render(args: argparse.Namespace) -> int:
         profile,
         totals,
         comparisons,
-        Path(os.path.relpath(paths["analysis"], paths["output_dir"])).as_posix(),
+        Path(os.path.relpath(paths["analysis"], paths["report_md"].parent)).as_posix(),
+        paths,
     )
-    page = render_html(target, analysis, manifest, totals, comparisons)
+    page = render_html(target, analysis, manifest, totals, comparisons, paths)
     atomic_write_text(paths["report_md"], markdown)
     atomic_write_text(paths["report_html"], page)
     update_daily_indexes(profile)
@@ -1629,7 +1704,6 @@ def verify(args: argparse.Namespace) -> int:
     errors, warnings = validate_analysis(analysis, manifest)
 
     record_dir = paths["record_dir"]
-    output_dir = paths["output_dir"]
     for asset in manifest.get("assets", []):
         source = record_dir / asset["relative_path"]
         if not source.exists():
@@ -1641,7 +1715,10 @@ def verify(args: argparse.Namespace) -> int:
             errors.append(f"源媒体哈希变化：{source.name}")
         preview = asset.get("preview_path")
         if preview:
-            preview_path = output_dir / preview
+            preview_path = manifest_preview_path(asset, manifest, paths)
+            if preview_path is None:
+                errors.append(f"预览路径无效：{source.name}")
+                continue
             if not preview_path.exists() or preview_path.stat().st_size == 0:
                 errors.append(f"预览缺失：{source.name}")
         else:
@@ -1654,9 +1731,9 @@ def verify(args: argparse.Namespace) -> int:
             errors.append(f"报告没有包含日期：{report_path}")
 
     for index_path in (
-        paths["daily_output_root"] / "README.md",
-        paths["daily_output_root"] / "index.html",
-        paths["runtime_root"] / "index.html",
+        paths["daily_index_md"],
+        paths["daily_index_html"],
+        paths["dashboard"],
     ):
         if not index_path.exists() or index_path.stat().st_size == 0:
             errors.append(f"每日索引缺失：{index_path}")
@@ -1690,8 +1767,8 @@ def verify(args: argparse.Namespace) -> int:
 
     for html_path in (
         paths["report_html"],
-        paths["daily_output_root"] / "index.html",
-        paths["runtime_root"] / "index.html",
+        paths["daily_index_html"],
+        paths["dashboard"],
     ):
         if not html_path.exists() or html_path.stat().st_size == 0:
             continue
@@ -1704,6 +1781,16 @@ def verify(args: argparse.Namespace) -> int:
                 errors.append(
                     f"HTML 图片数不一致：期望 {expected_images}，实际 {audit.image_count}"
                 )
+
+    boundary_roots = {
+        (ROOT / "data").resolve(),
+        paths["records_root"].resolve(),
+        paths["runtime_root"].resolve(),
+    }
+    for boundary_root in sorted(boundary_roots):
+        if boundary_root.exists():
+            for misplaced_html in boundary_root.rglob("*.html"):
+                errors.append(f"HTML 不应位于 {boundary_root.name}/：{misplaced_html}")
 
     if errors:
         print("VERIFY=failed")
@@ -1719,7 +1806,7 @@ def verify(args: argparse.Namespace) -> int:
     print(f"PREVIEWS={manifest.get('preview_count', 0)}")
     print(f"REPORT_MD={paths['report_md']}")
     print(f"REPORT_HTML={paths['report_html']}")
-    print(f"DASHBOARD={paths['runtime_root'] / 'index.html'}")
+    print(f"DASHBOARD={paths['dashboard']}")
     print(f"DATABASE={db_path}")
     for warning in sorted(set(warnings)):
         print(f"WARNING={warning}")
@@ -1737,8 +1824,12 @@ def status(args: argparse.Namespace) -> int:
         f"{paths['record_dir']}"
     )
     print(
-        f"OUTPUT_DIR={'ready' if paths['output_dir'].exists() else 'missing'}:"
-        f"{paths['output_dir']}"
+        f"RUNTIME_DIR={'ready' if paths['runtime_day_dir'].exists() else 'missing'}:"
+        f"{paths['runtime_day_dir']}"
+    )
+    print(
+        f"SITE_DIR={'ready' if paths['site_day_dir'].exists() else 'missing'}:"
+        f"{paths['site_day_dir']}"
     )
     print(f"MEDIA={len(media)}")
     print(f"MANIFEST={'ready' if paths['manifest'].exists() else 'missing'}")
@@ -1746,7 +1837,7 @@ def status(args: argparse.Namespace) -> int:
     print(f"REPORT_MD={'ready' if paths['report_md'].exists() else 'missing'}")
     print(f"REPORT_HTML={'ready' if paths['report_html'].exists() else 'missing'}")
     print(
-        f"DASHBOARD={'ready' if (paths['runtime_root'] / 'index.html').exists() else 'missing'}"
+        f"DASHBOARD={'ready' if paths['dashboard'].exists() else 'missing'}"
     )
     db_path = database_path(profile)
     db_status = "missing"
@@ -1879,10 +1970,12 @@ def nutrition_summary(args: argparse.Namespace) -> int:
     )
     report_dir = nutrition_reports_dir(profile)
     report_dir.mkdir(parents=True, exist_ok=True)
+    html_dir = nutrition_site_dir(profile)
+    html_dir.mkdir(parents=True, exist_ok=True)
     basename = f"{end.strftime('%Y%m%d')}-{args.days}d"
     json_path = report_dir / f"{basename}.json"
     md_path = report_dir / f"{basename}.md"
-    html_path = report_dir / f"{basename}.html"
+    html_path = html_dir / f"{basename}.html"
     atomic_write_text(json_path, summary_json_text(result))
     atomic_write_text(md_path, render_summary_markdown(result))
     atomic_write_text(html_path, render_summary_html(result))
@@ -2160,6 +2253,7 @@ def doctor(_: argparse.Namespace) -> int:
         print(f"SHORTCUT_NAME={shortcut_name}")
         print(f"RECORDS_DIR={paths['records_root']}")
         print(f"RUNTIME_DIR={paths['runtime_root']}")
+        print(f"SITE_DIR={paths['site_root']}")
         db_path = database_path(profile)
         with NutritionStore(db_path) as store:
             stats = store.database_stats()

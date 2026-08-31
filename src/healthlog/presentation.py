@@ -6,6 +6,7 @@ import html
 import json
 import os
 import re
+from dataclasses import dataclass
 from datetime import date, datetime
 from html.parser import HTMLParser
 from pathlib import Path
@@ -446,7 +447,41 @@ def render_html(
 """
 
 
-def rendered_entry(paths: WorkspacePaths) -> dict[str, Any] | None:
+@dataclass(frozen=True, slots=True)
+class RenderedEntry:
+    """A validated daily report projected for indexes and navigation."""
+
+    record_date: str
+    directory: str
+    kcal: str
+    protein: str
+    confidence: str
+    summary: str
+
+
+@dataclass(frozen=True, slots=True)
+class DashboardView:
+    """One report exposed by the private dashboard."""
+
+    key: str
+    group: str
+    label: str
+    title: str
+    description: str
+    href: str
+
+    def payload(self) -> dict[str, str]:
+        return {
+            "key": self.key,
+            "group": self.group,
+            "label": self.label,
+            "title": self.title,
+            "description": self.description,
+            "href": self.href,
+        }
+
+
+def rendered_entry(paths: WorkspacePaths) -> RenderedEntry | None:
     analysis_path = paths.analysis
     runtime_day_dir = paths.runtime_day_dir
     if not analysis_path.exists() or not paths.report_html.exists():
@@ -457,14 +492,14 @@ def rendered_entry(paths: WorkspacePaths) -> dict[str, Any] | None:
     except (PipelineError, KeyError, TypeError, ValueError):
         return None
     summary = analysis.get("assessment", {}).get("summary", [])
-    return {
-        "date": analysis.get("date", runtime_day_dir.name),
-        "dir": runtime_day_dir.name,
-        "kcal": display_range(totals["kcal"], "kcal"),
-        "protein": display_range(totals["protein_g"], "g"),
-        "confidence": analysis.get("overall_confidence", "unknown"),
-        "summary": summary[0] if summary else "暂无摘要",
-    }
+    return RenderedEntry(
+        record_date=str(analysis.get("date", runtime_day_dir.name)),
+        directory=runtime_day_dir.name,
+        kcal=display_range(totals["kcal"], "kcal"),
+        protein=display_range(totals["protein_g"], "g"),
+        confidence=str(analysis.get("overall_confidence", "unknown")),
+        summary=str(summary[0]) if summary else "暂无摘要",
+    )
 
 
 def update_daily_indexes(profile: dict[str, Any]) -> None:
@@ -492,7 +527,7 @@ def update_daily_indexes(profile: dict[str, Any]) -> None:
     ]
     for entry in entries:
         md_lines.append(
-            f"| [{entry['date']}](./{entry['dir']}/README.md) | {entry['kcal']} | {entry['protein']} | {entry['confidence']} | {md_escape(entry['summary'])} |"
+            f"| [{entry.record_date}](./{entry.directory}/README.md) | {entry.kcal} | {entry.protein} | {entry.confidence} | {md_escape(entry.summary)} |"
         )
     if not entries:
         md_lines.append("| — | — | — | — | 尚无已完成报告 |")
@@ -501,7 +536,7 @@ def update_daily_indexes(profile: dict[str, Any]) -> None:
 
     cards = (
         "".join(
-            f'<a class="card" href="{html.escape(entry["dir"])}/index.html"><span>{html.escape(entry["date"])}</span><strong>{html.escape(entry["kcal"])}</strong><em>{html.escape(entry["protein"])} 蛋白质</em><p>{html.escape(entry["summary"])}</p></a>'
+            f'<a class="card" href="{html.escape(entry.directory)}/index.html"><span>{html.escape(entry.record_date)}</span><strong>{html.escape(entry.kcal)}</strong><em>{html.escape(entry.protein)} 蛋白质</em><p>{html.escape(entry.summary)}</p></a>'
             for entry in entries
         )
         or "<p>尚无已完成报告。</p>"
@@ -521,122 +556,114 @@ def newest_report(report_dir: Path, suffix: str) -> Path | None:
     return candidates[0] if candidates else None
 
 
-def update_dashboard(profile: dict[str, Any]) -> Path:
-    paths = paths_for(date.today(), profile)
-    local_site_root = paths.site_root
-    local_site_root.mkdir(parents=True, exist_ok=True)
-    dashboard_path = paths.dashboard
+def _dashboard_view(
+    site_root: Path,
+    key: str,
+    group: str,
+    label: str,
+    title: str,
+    description: str,
+    target: Path | None,
+) -> DashboardView | None:
+    if target is None or not target.is_file():
+        return None
+    return DashboardView(
+        key=key,
+        group=group,
+        label=label,
+        title=title,
+        description=description,
+        href=relative_href(site_root, target),
+    )
 
-    daily_dirs = sorted(
+
+def _dashboard_views(
+    site_root: Path,
+    latest_entry: RenderedEntry | None,
+    latest_report: Path | None,
+    daily_index: Path,
+    seven_day: Path | None,
+    thirty_day: Path | None,
+) -> list[DashboardView]:
+    specifications = [
         (
-            path
-            for path in paths.daily_site_root.glob("[0-9]" * 8)
-            if path.is_dir() and (path / REPORT_HTML_NAME).is_file()
+            "health",
+            "健康计划",
+            "健康与补剂",
+            "健康建议与补剂方案",
+            "查看营养成分表、补剂取舍、使用时间和风险提示。",
+            site_root / "health" / "index.html",
         ),
-        reverse=True,
-    )
-    latest_daily_paths = (
-        paths_for(datetime.strptime(daily_dirs[0].name, "%Y%m%d").date(), profile)
-        if daily_dirs
-        else None
-    )
-    latest_entry = rendered_entry(latest_daily_paths) if latest_daily_paths else None
+        (
+            "latest",
+            "每日饮食",
+            "最近一天",
+            f"{latest_entry.record_date} 饮食分析"
+            if latest_entry
+            else "最近一天饮食分析",
+            "逐餐估算、目标比较、照片证据与不确定性。",
+            latest_report,
+        ),
+        (
+            "daily",
+            "每日饮食",
+            "全部日期",
+            "每日饮食索引",
+            "按日期进入已完成的饮食报告。",
+            daily_index,
+        ),
+        (
+            "week",
+            "长期趋势",
+            "7 天",
+            "7 天营养汇总",
+            "查看记录覆盖、区间均值与短期趋势证据。",
+            seven_day,
+        ),
+        (
+            "month",
+            "长期趋势",
+            "30 天",
+            "30 天营养汇总",
+            "查看更长窗口的摄入区间与数据缺口。",
+            thirty_day,
+        ),
+    ]
+    views = [
+        _dashboard_view(site_root, *specification) for specification in specifications
+    ]
+    return [view for view in views if view is not None]
 
-    report_dir = nutrition_site_dir(profile)
-    supplement_report = local_site_root / "health" / "index.html"
-    daily_index = paths.daily_index_html
-    seven_day = newest_report(report_dir, "7d")
-    thirty_day = newest_report(report_dir, "30d")
 
-    views: list[dict[str, str]] = []
-
-    def add_view(
-        key: str,
-        group: str,
-        label: str,
-        title: str,
-        description: str,
-        target: Path | None,
-    ) -> None:
-        if target is None or not target.is_file():
-            return
-        views.append(
-            {
-                "key": key,
-                "group": group,
-                "label": label,
-                "title": title,
-                "description": description,
-                "href": relative_href(local_site_root, target),
-            }
-        )
-
-    add_view(
-        "health",
-        "健康计划",
-        "健康与补剂",
-        "健康建议与补剂方案",
-        "查看营养成分表、补剂取舍、使用时间和风险提示。",
-        supplement_report,
-    )
-    add_view(
-        "latest",
-        "每日饮食",
-        "最近一天",
-        f"{latest_entry['date']} 饮食分析" if latest_entry else "最近一天饮食分析",
-        "逐餐估算、目标比较、照片证据与不确定性。",
-        latest_daily_paths.report_html if latest_daily_paths else None,
-    )
-    add_view(
-        "daily",
-        "每日饮食",
-        "全部日期",
-        "每日饮食索引",
-        "按日期进入已完成的饮食报告。",
-        daily_index,
-    )
-    add_view(
-        "week",
-        "长期趋势",
-        "7 天",
-        "7 天营养汇总",
-        "查看记录覆盖、区间均值与短期趋势证据。",
-        seven_day,
-    )
-    add_view(
-        "month",
-        "长期趋势",
-        "30 天",
-        "30 天营养汇总",
-        "查看更长窗口的摄入区间与数据缺口。",
-        thirty_day,
-    )
-
+def _render_dashboard_page(
+    latest_entry: RenderedEntry | None,
+    daily_count: int,
+    views: list[DashboardView],
+    generated: str,
+) -> str:
     nav_groups: list[str] = []
-    for group in dict.fromkeys(view["group"] for view in views):
+    for group in dict.fromkeys(view.group for view in views):
         links = "".join(
             (
-                f'<a class="nav-link" href="{html.escape(view["href"], quote=True)}" '
-                f'data-view="{html.escape(view["key"], quote=True)}">'
-                f'<span>{html.escape(view["label"])}</span><b aria-hidden="true">›</b></a>'
+                f'<a class="nav-link" href="{html.escape(view.href, quote=True)}" '
+                f'data-view="{html.escape(view.key, quote=True)}">'
+                f'<span>{html.escape(view.label)}</span><b aria-hidden="true">›</b></a>'
             )
             for view in views
-            if view["group"] == group
+            if view.group == group
         )
         nav_groups.append(
             f'<section class="nav-group"><p>{html.escape(group)}</p>{links}</section>'
         )
 
-    latest_date = latest_entry["date"] if latest_entry else "尚无记录"
-    latest_kcal = latest_entry["kcal"] if latest_entry else "—"
-    latest_protein = latest_entry["protein"] if latest_entry else "—"
-    daily_count = len(daily_dirs)
+    latest_date = latest_entry.record_date if latest_entry else "尚无记录"
+    latest_kcal = latest_entry.kcal if latest_entry else "—"
+    latest_protein = latest_entry.protein if latest_entry else "—"
     view_payload = json.dumps(
-        {view["key"]: view for view in views},
+        {view.key: view.payload() for view in views},
         ensure_ascii=False,
         separators=(",", ":"),
     ).replace("<", "\\u003c")
-    generated = datetime.now().astimezone().isoformat(timespec="seconds")
 
     page = f"""<!doctype html>
 <html lang="zh-CN">
@@ -735,5 +762,40 @@ def update_dashboard(profile: dict[str, Any]) -> Path:
 </body>
 </html>
 """
-    atomic_write_text(dashboard_path, page)
-    return dashboard_path
+    return page
+
+
+def update_dashboard(profile: dict[str, Any]) -> Path:
+    paths = paths_for(date.today(), profile)
+    paths.site_root.mkdir(parents=True, exist_ok=True)
+    daily_dirs = sorted(
+        (
+            path
+            for path in paths.daily_site_root.glob("[0-9]" * 8)
+            if path.is_dir() and (path / REPORT_HTML_NAME).is_file()
+        ),
+        reverse=True,
+    )
+    latest_paths = (
+        paths_for(datetime.strptime(daily_dirs[0].name, "%Y%m%d").date(), profile)
+        if daily_dirs
+        else None
+    )
+    latest_entry = rendered_entry(latest_paths) if latest_paths else None
+    report_dir = nutrition_site_dir(profile)
+    views = _dashboard_views(
+        paths.site_root,
+        latest_entry,
+        latest_paths.report_html if latest_paths else None,
+        paths.daily_index_html,
+        newest_report(report_dir, "7d"),
+        newest_report(report_dir, "30d"),
+    )
+    page = _render_dashboard_page(
+        latest_entry,
+        len(daily_dirs),
+        views,
+        datetime.now().astimezone().isoformat(timespec="seconds"),
+    )
+    atomic_write_text(paths.dashboard, page)
+    return paths.dashboard

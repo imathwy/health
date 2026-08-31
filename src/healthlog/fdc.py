@@ -10,6 +10,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from . import __version__
 from .nutrition import CORE_NUTRIENTS
 
 
@@ -105,7 +106,10 @@ def _request_json(
 ) -> dict[str, Any]:
     url = f"{API_ROOT}/{path.lstrip('/')}?{urlencode({'api_key': api_key})}"
     data = None
-    headers = {"Accept": "application/json", "User-Agent": "local-healthlog/0.2"}
+    headers = {
+        "Accept": "application/json",
+        "User-Agent": f"local-healthlog/{__version__}",
+    }
     if body is not None:
         data = json.dumps(body).encode("utf-8")
         headers["Content-Type"] = "application/json"

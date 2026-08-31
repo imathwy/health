@@ -55,9 +55,14 @@
       "Do not infer a deficiency or add a supplement from one day of food photos."
     ]
   },
+  "privacy": {
+    "allow_usda_text_queries": false
+  },
   "pipeline": {
     "shortcut_name": "导出每日照片 CLI",
     "daily_directory": "data/daily",
+    "database_path": "data/state/healthlog.sqlite3",
+    "nutrition_reports_directory": "data/reports/nutrition",
     "report_language": "zh-CN"
   }
 }

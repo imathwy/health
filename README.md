@@ -1,21 +1,25 @@
 # Local HealthLog
 
-Local HealthLog is a macOS-first, private Apple Photos workflow for dated food logging. It exports one day of photos through Apple Shortcuts, prepares reviewable JPEG previews, and lets Codex generate structured nutrition estimates, Markdown reports, and standalone HTML.
+Local HealthLog 是一套 macOS 本地优先的饮食记录流水线：Apple Shortcut 按日期导出照片，Codex 检查全部图片并生成带不确定区间和来源记录的 `analysis.json`，随后产出静态 Markdown/HTML、同步本地 SQLite，并生成 7/30 天汇总。
 
 ```mermaid
 flowchart LR
-    A[Date] --> B[Apple Photos Shortcut]
-    B --> C[data/daily/YYYYMMDD]
-    C --> D[Manifest and previews]
-    D --> E[Codex image review]
-    E --> F[analysis.json]
-    F --> G[Markdown and static HTML]
-    G --> H[Verification]
+    A[日期] --> B[Apple Photos Shortcut]
+    B --> C[本地原图]
+    C --> D[清单与 JPEG 预览]
+    D --> E[Codex 逐图检查]
+    U[可选 USDA 文本查询] --> E
+    E --> F[analysis.json v2]
+    F --> G[每日 Markdown / HTML]
+    F --> H[本地 SQLite]
+    H --> I[7 / 30 天汇总]
 ```
 
-## Clone and set up
+核心约束：原图不修改，私密数据不进 Git；照片只证明“可能吃了什么和多少”，营养组成来源单独记录；所有估算保留下界和上界，不把区间中点伪装成实测值。
 
-Requirements are macOS, Python 3.10 or newer, and the built-in `shortcuts` command. ImageMagick is preferred for HEIC previews; macOS `sips` is the fallback.
+## Clone 与初始化
+
+要求：macOS、Python 3.10+、系统自带的 `shortcuts`。HEIC 预览优先使用 ImageMagick，未安装时回退到 macOS `sips`。运行时没有第三方 Python 依赖。
 
 ```bash
 git clone <repository-url> local-healthlog
@@ -23,91 +27,112 @@ cd local-healthlog
 ./scripts/setup.sh --open-shortcut
 ```
 
-The setup script:
+脚本会：
 
-- creates an ignored local profile from `config/health_profile.example.json`;
-- creates the private `data/` directories;
-- installs optional `diet` and Codex Skill links under the current user account;
-- builds and signs a Shortcut whose destination is this clone’s `data/daily/` path;
-- opens the Shortcut when `--open-shortcut` is supplied.
+- 从安全模板创建被忽略的 `config/health_profile.json`；
+- 创建 `data/daily/`、`data/state/` 和报告目录；
+- 可选安装 `diet` 与 Codex Skill 的用户级链接；
+- 为当前 clone 的绝对路径构建并签名 Shortcut；
+- 初始化私有 SQLite 并运行环境检查。
 
-Apple requires one manual Shortcut import and Photos permission grant. After clicking **Add Shortcut** and allowing Photos access, the workflow is ready. Edit `config/health_profile.json` before relying on its nutrition targets.
-
-For a code-only setup, such as a clean-clone test:
+Apple 要求首次手工导入 Shortcut，并允许它读取 Photos。完成后编辑本地健康档案中的目标值。纯代码或 CI 式检查可以运行：
 
 ```bash
 ./scripts/setup.sh --no-install --skip-shortcut
 ```
 
-## Daily use
+## 每日分析
 
-In Codex:
+在 Codex 中说：
 
-> Use `$daily-diet-pipeline` to analyze yesterday’s food photos.
+> 使用 `$daily-diet-pipeline` 分析昨天的饮食。
 
-From the terminal:
+终端对应流程：
 
 ```bash
-diet doctor
 diet prepare yesterday
+# Codex 检查全部预览并填写 analysis.json
 diet render yesterday
 diet verify yesterday
 diet status yesterday
 ```
 
-`diet yesterday` is shorthand for `diet prepare yesterday`. Preparation runs the Shortcut unless `--skip-export` is explicitly supplied.
+`diet yesterday` 是 `diet prepare yesterday` 的缩写。`render` 同时完成每日 Markdown/HTML 和 SQLite 同步；`verify` 会检查原图哈希、预览、schema、静态链接、报告和数据库哈希。
 
-## Repository layout
+Schema v2 为每个食物条目分开记录：
+
+- `evidence.portion_method`：称重、用户说明、包装份量、照片估份或未知；
+- `evidence.nutrition_source`：包装标签、USDA FDC、配方估算、人工录入或未知；
+- `nutrition`：热量、蛋白质、碳水、脂肪、纤维、钠的区间；
+- `optional_nutrients`：仅保存标签或数据库实际支持的糖、钾、钙等，不把缺失值填成零。
+
+## 可选 USDA FoodData Central
+
+USDA 查询只发送食物文字或 FDC ID，不上传照片、健康档案或分析。默认优先 Foundation、SR Legacy 和 Survey/FNDDS；混合食堂菜继续使用配方宽区间。
+
+Codex 自动决定是否查询时会遵守本地档案的 `privacy.allow_usda_text_queries`；直接运行以下 `fdc-*` 命令本身视为一次显式查询请求。
+
+```bash
+diet fdc-search "salmon cooked" --limit 5 --agent
+diet fdc-food 171999 --grams 150:220 --agent
+diet fdc-food 171999 --grams 150:220 --offline --agent
+```
+
+查询结果缓存在被忽略的 SQLite 中。没有 API key 时使用 USDA 的限流 `DEMO_KEY`；长期使用可在 shell 环境设置：
+
+```bash
+export FDC_API_KEY="your-data-gov-key"
+```
+
+不要把真实 key 写入配置或 `.env.example`。本项目也不会自动加载 `.env`。
+
+## 7/30 天汇总
+
+```bash
+diet summary --days 7 --end today
+diet summary --days 30 --end yesterday --agent
+```
+
+输出位于 `data/reports/nutrition/`，同时包含 JSON、Markdown 和无外部资源的静态 HTML。汇总会列出实际记录天数与缺失日期，只对有记录日期求平均，并分别处理区间上下界。少于 5 个有效日期时明确显示“数据不足”，不推断趋势。
+
+如果手工复制或批量修改了旧记录：
+
+```bash
+diet rebuild-db
+diet db-status
+```
+
+`analysis.json` 是可审阅的主记录；SQLite 是可重建索引，不是唯一数据源。
+
+## 文件结构
 
 ```text
 .
-├── bin/                         # clone-local command entrypoints
-│   └── diet
+├── bin/diet                     # clone-local CLI
 ├── config/
-│   ├── health_profile.example.json  # safe tracked template
-│   └── health_profile.json          # private, ignored
-├── data/                        # all private health data, ignored
+│   ├── health_profile.example.json
+│   └── health_profile.json      # 私密、忽略
+├── data/                        # 全部私密数据、忽略
 │   ├── daily/
+│   ├── reports/nutrition/
+│   ├── state/healthlog.sqlite3
 │   ├── medical/
 │   └── supplements/
-├── src/healthlog/               # report pipeline implementation
-├── scripts/
-│   ├── setup.sh
-│   ├── build_shortcut.py
-│   └── check_privacy.py
-├── skills/daily-diet-pipeline/  # portable Codex Skill
-├── build/                       # generated Shortcut and caches, ignored
-├── docs/                        # architecture and privacy documentation
-└── .githooks/pre-commit         # staged-content privacy gate
+├── src/healthlog/               # 流水线、SQLite、USDA 与汇总代码
+├── tests/                       # 无个人数据的标准库测试
+├── scripts/                     # 初始化、Shortcut 构建、隐私检查
+├── skills/daily-diet-pipeline/  # 可安装 Codex Skill 与渐进式参考
+├── build/                       # 生成物、忽略
+└── docs/                        # 架构、隐私与上游设计审查
 ```
 
-Raw media is never modified or deleted by the pipeline. The food-photo convention is configured in the local profile. With the default setting, a dated food or drink photo means some amount was consumed, while the consumed quantity can remain uncertain. Repeated angles count once.
-
-## Privacy model
-
-Only source code, documentation, the example profile, and the Skill belong in Git. These remain local:
-
-- personal profile and nutrition targets;
-- exported photos, medical records, supplement records, analyses, and reports;
-- generated previews, Shortcut XML, and signed `.shortcut` files;
-- environment files, caches, and editor state.
-
-Run the same privacy gate used by the pre-commit hook at any time:
+## 测试与隐私检查
 
 ```bash
+PYTHONPATH=src python3 -m unittest discover -s tests -v
 python3 scripts/check_privacy.py
 ```
 
-See [`docs/privacy.md`](docs/privacy.md) for the exact boundary and recovery rules.
+Git 只应包含代码、文档、示例配置和 Skill。个人档案、照片、医疗记录、补剂记录、分析、报告、数据库、USDA 缓存、Shortcut 生成物和密钥都保留在本机。详见 [隐私边界](docs/privacy.md) 和 [架构](docs/architecture.md)。
 
-## Rebuild the Shortcut
-
-The builder derives the destination from the current clone instead of embedding a developer path:
-
-```bash
-python3 scripts/build_shortcut.py --sign
-plutil -lint build/shortcuts/daily_photos_cli.xml
-open "build/shortcuts/导出每日照片 CLI.shortcut"
-```
-
-Generated artifacts stay in `build/` and are never committed. The installed Shortcut receives `YYYY-MM-DD`, `today`, or `yesterday` through standard input and does not display date or save-location dialogs.
+本项目从现有营养 Skills 借鉴了接口思想，并独立实现了适合照片证据的来源模型；取舍与许可证见 [上游设计审查](docs/upstream-inspirations.md)。

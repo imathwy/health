@@ -11,6 +11,7 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,20 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import unquote, urlsplit
+
+from .fdc import (
+    DEFAULT_DATA_TYPES,
+    FDCError,
+    analysis_item_candidate,
+    food_details,
+    normalize_food,
+    normalize_search,
+    search_foods,
+)
+from .store import CORE_NUTRIENTS, NutritionStore
+from .summary import json_text as summary_json_text
+from .summary import make_summary, render_html as render_summary_html
+from .summary import render_markdown as render_summary_markdown
 
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[2]
@@ -49,14 +64,24 @@ CLASSIFICATIONS = {"consumed_food", "possible_food", "unrelated", "unreviewed"}
 FINAL_CLASSIFICATIONS = CLASSIFICATIONS - {"unreviewed"}
 DAY_TYPES = {"unknown", "rest", "strength", "swim", "tennis", "mixed"}
 CONFIDENCE_LEVELS = {"low", "medium", "high"}
-NUTRIENT_KEYS = (
-    "kcal",
-    "protein_g",
-    "carbohydrate_g",
-    "fat_g",
-    "fiber_g",
-    "sodium_mg",
-)
+NUTRIENT_KEYS = CORE_NUTRIENTS
+ANALYSIS_SCHEMA_VERSIONS = {1, 2}
+PORTION_METHODS = {
+    "manual_weight",
+    "manual_range",
+    "manual_serving",
+    "package_serving",
+    "visual_estimate",
+    "unknown",
+}
+NUTRITION_SOURCE_TYPES = {
+    "package_label",
+    "usda_fdc",
+    "chinese_food_composition",
+    "recipe_estimate",
+    "manual",
+    "unknown",
+}
 
 
 class PipelineError(RuntimeError):
@@ -175,11 +200,45 @@ def load_profile() -> dict[str, Any]:
     return profile
 
 
-def paths_for(target: date, profile: dict[str, Any]) -> dict[str, Path]:
-    daily_name = profile.get("pipeline", {}).get(
-        "daily_directory", "data/daily"
+def configured_private_path(
+    profile: dict[str, Any], key: str, default: str
+) -> Path:
+    raw = str(profile.get("pipeline", {}).get(key, default))
+    candidate = Path(raw).expanduser()
+    if candidate.is_absolute():
+        resolved = candidate.resolve()
+    else:
+        resolved = (ROOT / candidate).resolve()
+    try:
+        resolved.relative_to(ROOT)
+    except ValueError as exc:
+        raise PipelineError(
+            f"pipeline.{key} 必须位于仓库目录内：{resolved}"
+        ) from exc
+    return resolved
+
+
+def database_path(profile: dict[str, Any]) -> Path:
+    return configured_private_path(
+        profile, "database_path", "data/state/healthlog.sqlite3"
     )
-    daily_root = ROOT / str(daily_name)
+
+
+def nutrition_reports_dir(profile: dict[str, Any]) -> Path:
+    return configured_private_path(
+        profile, "nutrition_reports_directory", "data/reports/nutrition"
+    )
+
+
+def relative_private_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(ROOT).as_posix()
+    except ValueError:
+        return str(path.resolve())
+
+
+def paths_for(target: date, profile: dict[str, Any]) -> dict[str, Path]:
+    daily_root = configured_private_path(profile, "daily_directory", "data/daily")
     day_dir = daily_root / target.strftime("%Y%m%d")
     pipeline_dir = day_dir / PIPELINE_DIR_NAME
     return {
@@ -433,7 +492,7 @@ def build_manifest(
 
 def analysis_template(target: date, manifest: dict[str, Any]) -> dict[str, Any]:
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "date": target.isoformat(),
         "profile": PROFILE_PATH.relative_to(ROOT).as_posix(),
         "day_context": {
@@ -537,8 +596,14 @@ def validate_analysis(
     errors: list[str] = []
     warnings: list[str] = []
 
-    if analysis.get("schema_version") != 1:
-        errors.append("analysis.json schema_version 必须是 1")
+    schema_version = analysis.get("schema_version")
+    if schema_version not in ANALYSIS_SCHEMA_VERSIONS:
+        errors.append(
+            "analysis.json schema_version 必须是 "
+            + " 或 ".join(str(value) for value in sorted(ANALYSIS_SCHEMA_VERSIONS))
+        )
+    elif schema_version == 1:
+        warnings.append("analysis.json 仍是 schema v1，食物来源元数据不完整")
     if analysis.get("date") != manifest.get("date"):
         errors.append("analysis.json 与 manifest.json 的日期不一致")
 
@@ -630,9 +695,55 @@ def validate_analysis(
                 validate_range(
                     nutrition.get(nutrient), f"{prefix}.nutrition.{nutrient}", errors
                 )
+            optional_nutrients = item.get("optional_nutrients", {})
+            if not isinstance(optional_nutrients, dict):
+                errors.append(f"{prefix}.optional_nutrients 必须是对象")
+            else:
+                for nutrient, value in optional_nutrients.items():
+                    if not isinstance(nutrient, str) or not nutrient:
+                        errors.append(f"{prefix}.optional_nutrients 含无效名称")
+                        continue
+                    if nutrient in NUTRIENT_KEYS:
+                        errors.append(
+                            f"{prefix}.optional_nutrients.{nutrient} 与核心营养素重复"
+                        )
+                        continue
+                    validate_range(
+                        value, f"{prefix}.optional_nutrients.{nutrient}", errors
+                    )
             confidence = item.get("confidence")
             if confidence not in CONFIDENCE_LEVELS:
                 errors.append(f"{prefix}.confidence 无效：{confidence!r}")
+            evidence = item.get("evidence")
+            if schema_version == 2 and not isinstance(evidence, dict):
+                errors.append(f"{prefix}.evidence 必须是对象")
+            if isinstance(evidence, dict):
+                portion_method = evidence.get("portion_method")
+                if portion_method not in PORTION_METHODS:
+                    errors.append(
+                        f"{prefix}.evidence.portion_method 无效：{portion_method!r}"
+                    )
+                nutrition_source = evidence.get("nutrition_source")
+                if nutrition_source not in NUTRITION_SOURCE_TYPES:
+                    errors.append(
+                        f"{prefix}.evidence.nutrition_source 无效：{nutrition_source!r}"
+                    )
+                references = evidence.get("references", [])
+                if not isinstance(references, list):
+                    errors.append(f"{prefix}.evidence.references 必须是数组")
+                else:
+                    for reference_index, reference in enumerate(references):
+                        if not isinstance(reference, dict):
+                            errors.append(
+                                f"{prefix}.evidence.references[{reference_index}] 必须是对象"
+                            )
+                            continue
+                        if not isinstance(reference.get("provider"), str) or not reference.get("provider"):
+                            errors.append(
+                                f"{prefix}.evidence.references[{reference_index}].provider 缺失"
+                            )
+                if not isinstance(evidence.get("notes", []), list):
+                    errors.append(f"{prefix}.evidence.notes 必须是数组")
 
     for filename, row in image_records.items():
         classification = row.get("classification")
@@ -756,6 +867,46 @@ def bullet_lines(items: Any, fallback: str = "暂无") -> str:
     return "\n".join(f"- {item}" for item in items)
 
 
+def evidence_label(item: dict[str, Any]) -> str:
+    evidence = item.get("evidence")
+    if not isinstance(evidence, dict):
+        return "旧版/未记录"
+    source_labels = {
+        "package_label": "包装标签",
+        "usda_fdc": "USDA FDC",
+        "chinese_food_composition": "中国食物成分资料",
+        "recipe_estimate": "配方/常见做法估算",
+        "manual": "人工录入",
+        "unknown": "未明确",
+    }
+    portion_labels = {
+        "manual_weight": "称重",
+        "manual_range": "手工范围",
+        "manual_serving": "用户份量",
+        "package_serving": "包装份量",
+        "visual_estimate": "照片估份",
+        "unknown": "份量未知",
+    }
+    nutrition_source = source_labels.get(
+        str(evidence.get("nutrition_source")), str(evidence.get("nutrition_source", "未明确"))
+    )
+    portion_method = portion_labels.get(
+        str(evidence.get("portion_method")), str(evidence.get("portion_method", "份量未知"))
+    )
+    references = evidence.get("references", [])
+    reference_ids = []
+    if isinstance(references, list):
+        for reference in references:
+            if not isinstance(reference, dict):
+                continue
+            provider = reference.get("provider")
+            identifier = reference.get("id")
+            if provider and identifier:
+                reference_ids.append(f"{provider} {identifier}")
+    suffix = f"（{', '.join(reference_ids)}）" if reference_ids else ""
+    return f"{nutrition_source} + {portion_method}{suffix}"
+
+
 def render_markdown(
     target: date,
     analysis: dict[str, Any],
@@ -804,8 +955,8 @@ def render_markdown(
                 "",
                 f"关联图片：{', '.join(f'`{name}`' for name in meal.get('images', [])) or '无'}",
                 "",
-                "| 食物 | 估计份量 | 热量 | 蛋白质 | 碳水 | 脂肪 | 纤维 | 钠 | 置信度 |",
-                "|---|---|---:|---:|---:|---:|---:|---:|---|",
+                "| 食物 | 估计份量 | 热量 | 蛋白质 | 碳水 | 脂肪 | 纤维 | 钠 | 证据 | 置信度 |",
+                "|---|---|---:|---:|---:|---:|---:|---:|---|---|",
             ]
         )
         for item in meal["items"]:
@@ -822,6 +973,7 @@ def render_markdown(
                         display_range(nutrition["fat_g"], "g"),
                         display_range(nutrition["fiber_g"], "g"),
                         display_range(nutrition["sodium_mg"], "mg"),
+                        md_escape(evidence_label(item)),
                         md_escape(item["confidence"]),
                     ]
                 )
@@ -948,6 +1100,7 @@ def render_html(
                 f"<td>{html.escape(display_range(nutrition['protein_g'], 'g'))}</td>"
                 f"<td>{html.escape(display_range(nutrition['carbohydrate_g'], 'g'))}</td>"
                 f"<td>{html.escape(display_range(nutrition['fat_g'], 'g'))}</td>"
+                f"<td>{html.escape(evidence_label(item))}</td>"
                 f"<td>{html.escape(item['confidence'])}</td>"
                 "</tr>"
             )
@@ -955,7 +1108,7 @@ def render_html(
             "<section class=\"panel\">"
             f"<div class=\"section-head\"><div><p class=\"eyebrow\">{html.escape(meal.get('time') or '时间不确定')}</p><h2>{html.escape(meal['label'])}</h2></div>"
             f"<span class=\"pill neutral\">{len(meal.get('images', []))} 张图片</span></div>"
-            "<div class=\"table-wrap\"><table><thead><tr><th>食物与份量</th><th>热量</th><th>蛋白质</th><th>碳水</th><th>脂肪</th><th>置信度</th></tr></thead>"
+            "<div class=\"table-wrap\"><table><thead><tr><th>食物与份量</th><th>热量</th><th>蛋白质</th><th>碳水</th><th>脂肪</th><th>证据</th><th>置信度</th></tr></thead>"
             f"<tbody>{''.join(item_rows)}</tbody></table></div>"
             f"{html_list(meal.get('notes', []), '无额外备注')}"
             "</section>"
@@ -1109,6 +1262,29 @@ def load_analysis_bundle(
     return paths, manifest, analysis
 
 
+def sync_analysis_to_store(
+    *,
+    profile: dict[str, Any],
+    paths: dict[str, Path],
+    manifest: dict[str, Any],
+    analysis: dict[str, Any],
+    totals: dict[str, list[float]],
+    comparisons: list[dict[str, str]],
+) -> Path:
+    db_path = database_path(profile)
+    with NutritionStore(db_path) as store:
+        store.upsert_day(
+            analysis=analysis,
+            manifest=manifest,
+            analysis_path=relative_private_path(paths["analysis"]),
+            analysis_sha256=sha256_file(paths["analysis"]),
+            totals=totals,
+            targets=profile.get("targets", {}),
+            comparisons=comparisons,
+        )
+    return db_path
+
+
 def render(args: argparse.Namespace) -> int:
     profile = load_profile()
     target = resolve_date(args.date)
@@ -1127,10 +1303,20 @@ def render(args: argparse.Namespace) -> int:
     atomic_write_text(paths["report_md"], markdown)
     atomic_write_text(paths["report_html"], page)
     update_daily_indexes(paths["daily_root"])
+    db_path = sync_analysis_to_store(
+        profile=profile,
+        paths=paths,
+        manifest=manifest,
+        analysis=analysis,
+        totals=totals,
+        comparisons=comparisons,
+    )
 
     print(f"DATE={target.isoformat()}")
     print(f"REPORT_MD={paths['report_md']}")
     print(f"REPORT_HTML={paths['report_html']}")
+    print(f"DATABASE={db_path}")
+    print("DATABASE_STATUS=synced")
     print(f"TOTAL_KCAL={display_range(totals['kcal'], 'kcal')}")
     print(f"TOTAL_PROTEIN={display_range(totals['protein_g'], 'g')}")
     for warning in warnings:
@@ -1175,6 +1361,33 @@ def verify(args: argparse.Namespace) -> int:
         if not index_path.exists() or index_path.stat().st_size == 0:
             errors.append(f"每日索引缺失：{index_path}")
 
+    db_path = database_path(profile)
+    if not db_path.exists():
+        errors.append(f"营养数据库缺失：{db_path}")
+    else:
+        try:
+            with NutritionStore(db_path) as store:
+                db_state = store.day_state(target.isoformat())
+            if db_state is None:
+                errors.append(f"营养数据库没有 {target.isoformat()} 记录")
+            elif db_state.get("analysis_sha256") != sha256_file(paths["analysis"]):
+                errors.append("营养数据库记录已过期；重新运行 diet render")
+            else:
+                expected_totals = sum_nutrition(analysis)
+                for nutrient in NUTRIENT_KEYS:
+                    stored = db_state.get("nutrients", {}).get(nutrient)
+                    if stored is None:
+                        errors.append(f"营养数据库缺少 {nutrient}")
+                        continue
+                    if any(
+                        abs(float(stored[key]) - float(expected_totals[nutrient][index]))
+                        > 1e-6
+                        for index, key in enumerate(("low", "high"))
+                    ):
+                        errors.append(f"营养数据库 {nutrient} 合计与 analysis.json 不一致")
+        except (OSError, RuntimeError, sqlite3.Error) as exc:
+            errors.append(f"营养数据库无法读取：{exc}")
+
     for html_path in (
         paths["report_html"],
         paths["daily_root"] / "index.html",
@@ -1205,6 +1418,7 @@ def verify(args: argparse.Namespace) -> int:
     print(f"PREVIEWS={manifest.get('preview_count', 0)}")
     print(f"REPORT_MD={paths['report_md']}")
     print(f"REPORT_HTML={paths['report_html']}")
+    print(f"DATABASE={db_path}")
     for warning in sorted(set(warnings)):
         print(f"WARNING={warning}")
     return 0
@@ -1222,6 +1436,352 @@ def status(args: argparse.Namespace) -> int:
     print(f"ANALYSIS={'ready' if paths['analysis'].exists() else 'missing'}")
     print(f"REPORT_MD={'ready' if paths['report_md'].exists() else 'missing'}")
     print(f"REPORT_HTML={'ready' if paths['report_html'].exists() else 'missing'}")
+    db_path = database_path(profile)
+    db_status = "missing"
+    if db_path.exists():
+        try:
+            with NutritionStore(db_path) as store:
+                state = store.day_state(target.isoformat())
+            if state is None:
+                db_status = "day-missing"
+            elif paths["analysis"].exists() and state.get("analysis_sha256") != sha256_file(paths["analysis"]):
+                db_status = "stale"
+            else:
+                db_status = "ready"
+        except (OSError, RuntimeError, sqlite3.Error):
+            db_status = "error"
+    print(f"DATABASE={db_status}:{db_path}")
+    return 0
+
+
+def database_status(args: argparse.Namespace) -> int:
+    profile = load_profile()
+    db_path = database_path(profile)
+    with NutritionStore(db_path) as store:
+        stats = store.database_stats()
+    envelope = {"meta": {"source": "local", "database": str(db_path)}, "results": stats}
+    if args.agent:
+        print(json.dumps(envelope, ensure_ascii=False, separators=(",", ":")))
+    else:
+        print(f"DATABASE={db_path}")
+        print(f"SCHEMA_VERSION={stats['schema_version']}")
+        print(f"DAYS={stats['day_count']}")
+        print(f"FIRST_DATE={stats['first_date'] or ''}")
+        print(f"LAST_DATE={stats['last_date'] or ''}")
+        print(f"MEALS={stats['meal_count']}")
+        print(f"FOOD_ITEMS={stats['food_item_count']}")
+        print(f"IMAGES={stats['image_count']}")
+    return 0
+
+
+def rebuild_database(args: argparse.Namespace) -> int:
+    profile = load_profile()
+    daily_root = paths_for(date.today(), profile)["daily_root"]
+    db_path = database_path(profile)
+    with NutritionStore(db_path) as store:
+        store.clear_derived_days()
+
+    synced: list[str] = []
+    skipped: list[dict[str, Any]] = []
+    if daily_root.exists():
+        day_dirs = sorted(
+            path
+            for path in daily_root.iterdir()
+            if path.is_dir() and re.fullmatch(r"\d{8}", path.name)
+        )
+    else:
+        day_dirs = []
+    for day_dir in day_dirs:
+        try:
+            target = datetime.strptime(day_dir.name, "%Y%m%d").date()
+            paths, manifest, analysis = load_analysis_bundle(target, profile)
+            errors, _ = validate_analysis(analysis, manifest)
+            if errors:
+                skipped.append({"date": target.isoformat(), "reason": "; ".join(errors)})
+                continue
+            totals = sum_nutrition(analysis)
+            comparisons = comparison_rows(
+                totals, profile, analysis["day_context"]["day_type"]
+            )
+            sync_analysis_to_store(
+                profile=profile,
+                paths=paths,
+                manifest=manifest,
+                analysis=analysis,
+                totals=totals,
+                comparisons=comparisons,
+            )
+            synced.append(target.isoformat())
+        except (PipelineError, KeyError, TypeError, ValueError) as exc:
+            skipped.append({"date": day_dir.name, "reason": str(exc)})
+
+    results = {"synced_dates": synced, "skipped": skipped}
+    if args.agent:
+        print(
+            json.dumps(
+                {"meta": {"source": "local", "database": str(db_path)}, "results": results},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+    else:
+        print(f"DATABASE={db_path}")
+        print(f"SYNCED={len(synced)}")
+        print(f"SKIPPED={len(skipped)}")
+        for row in skipped:
+            print(f"WARNING={row['date']}: {row['reason']}")
+    return 0 if not skipped else 1
+
+
+def nutrition_summary(args: argparse.Namespace) -> int:
+    profile = load_profile()
+    if args.days < 1 or args.days > 3660:
+        raise PipelineError("--days 必须在 1 到 3660 之间")
+    end = resolve_date(args.end)
+    start = end - timedelta(days=args.days - 1)
+    db_path = database_path(profile)
+    with NutritionStore(db_path) as store:
+        rows = store.list_days(start, end)
+        provenance = store.provenance_counts(start, end)
+    result = make_summary(
+        rows=rows,
+        start=start,
+        end=end,
+        requested_days=args.days,
+        provenance=provenance,
+    )
+    report_dir = nutrition_reports_dir(profile)
+    report_dir.mkdir(parents=True, exist_ok=True)
+    basename = f"{end.strftime('%Y%m%d')}-{args.days}d"
+    json_path = report_dir / f"{basename}.json"
+    md_path = report_dir / f"{basename}.md"
+    html_path = report_dir / f"{basename}.html"
+    atomic_write_text(json_path, summary_json_text(result))
+    atomic_write_text(md_path, render_summary_markdown(result))
+    atomic_write_text(html_path, render_summary_html(result))
+    html_errors, html_warnings, _ = audit_static_html(html_path)
+    if html_errors:
+        raise PipelineError("汇总 HTML 未通过校验：\n- " + "\n- ".join(html_errors))
+
+    meta = {
+        "source": "local",
+        "database": str(db_path),
+        "reports": {
+            "json": str(json_path),
+            "markdown": str(md_path),
+            "html": str(html_path),
+        },
+    }
+    if args.agent:
+        print(
+            json.dumps(
+                {"meta": meta, "results": result},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+    else:
+        period = result["period"]
+        print(f"PERIOD={period['start']}..{period['end']}")
+        print(f"LOGGED_DAYS={period['logged_days']}/{period['requested_days']}")
+        print(f"REPORT_JSON={json_path}")
+        print(f"REPORT_MD={md_path}")
+        print(f"REPORT_HTML={html_path}")
+        for warning in html_warnings:
+            print(f"WARNING={warning}")
+    return 0
+
+
+def fdc_api_key() -> tuple[str, str]:
+    if os.environ.get("FDC_API_KEY"):
+        return str(os.environ["FDC_API_KEY"]), "FDC_API_KEY"
+    if os.environ.get("USDA_API_KEY"):
+        return str(os.environ["USDA_API_KEY"]), "USDA_API_KEY"
+    return "DEMO_KEY", "DEMO_KEY"
+
+
+def fdc_cache_key(operation: str, request: dict[str, Any]) -> str:
+    canonical = json.dumps(
+        {"operation": operation, "request": request},
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def cached_fdc_payload(
+    *,
+    store: NutritionStore,
+    cache_key: str,
+    max_age_days: int,
+) -> tuple[dict[str, Any] | None, str | None]:
+    cached = store.cache_get(cache_key)
+    if cached is None:
+        return None, None
+    try:
+        fetched_at = datetime.fromisoformat(str(cached["fetched_at"]))
+        age = datetime.now().astimezone() - fetched_at
+    except (TypeError, ValueError):
+        return None, None
+    if age > timedelta(days=max_age_days):
+        return None, None
+    return cached["response"], str(cached["fetched_at"])
+
+
+def fdc_search_command(args: argparse.Namespace) -> int:
+    profile = load_profile()
+    if args.limit < 1 or args.limit > 25:
+        raise PipelineError("--limit 必须在 1 到 25 之间")
+    if args.cache_days < 0 or args.timeout < 1:
+        raise PipelineError("--cache-days 不能为负，--timeout 必须为正数")
+    data_types = list(DEFAULT_DATA_TYPES)
+    if args.include_branded:
+        data_types.append("Branded")
+    request_data = {
+        "query": args.query.strip(),
+        "pageSize": args.limit,
+        "dataType": data_types,
+    }
+    if not request_data["query"]:
+        raise PipelineError("食物搜索词不能为空")
+    cache_key = fdc_cache_key("search", request_data)
+    db_path = database_path(profile)
+    source = "cache"
+    fetched_at: str | None = None
+    with NutritionStore(db_path) as store:
+        payload = None
+        if not args.refresh:
+            payload, fetched_at = cached_fdc_payload(
+                store=store, cache_key=cache_key, max_age_days=args.cache_days
+            )
+        if payload is None:
+            if args.offline:
+                raise PipelineError("离线模式下没有可用的 USDA 缓存")
+            key, key_source = fdc_api_key()
+            try:
+                response = search_foods(
+                    args.query,
+                    api_key=key,
+                    page_size=args.limit,
+                    data_types=tuple(data_types),
+                    timeout=args.timeout,
+                )
+            except FDCError as exc:
+                raise PipelineError(str(exc)) from exc
+            payload = response.payload
+            fetched_at = store.cache_put(
+                cache_key, response.operation, response.request, response.payload
+            )
+            source = "live"
+        else:
+            key_source = "cache"
+    try:
+        foods = normalize_search(payload)
+    except FDCError as exc:
+        raise PipelineError(str(exc)) from exc
+    envelope = {
+        "meta": {
+            "source": source,
+            "provider": "USDA FoodData Central",
+            "fetched_at": fetched_at,
+            "api_key_source": key_source,
+            "query_sent": request_data["query"] if source == "live" else None,
+            "privacy": "Only the text search query is sent to USDA; photos remain local.",
+        },
+        "results": foods,
+    }
+    if args.agent:
+        print(json.dumps(envelope, ensure_ascii=False, separators=(",", ":")))
+    else:
+        print(f"SOURCE={source}")
+        print(f"RESULTS={len(foods)}")
+        for food in foods:
+            nutrients = food["nutrients_per_100g"]
+            print(
+                f"FDC_ID={food['fdc_id']} | {food['description']} | "
+                f"{nutrients.get('kcal', '?')} kcal | "
+                f"protein={nutrients.get('protein_g', '?')} g/100g | "
+                f"type={food['data_type']}"
+            )
+    return 0
+
+
+def parse_grams(value: str) -> tuple[float, float]:
+    if value.strip().startswith("-"):
+        raise PipelineError("--grams 不能为负数")
+    text = value.strip().replace("–", ":").replace("—", ":").replace("-", ":")
+    parts = [part.strip() for part in text.split(":") if part.strip()]
+    if len(parts) not in {1, 2}:
+        raise PipelineError("--grams 使用 150 或 100:150")
+    try:
+        numbers = [float(part) for part in parts]
+    except ValueError as exc:
+        raise PipelineError("--grams 必须是数字或数字范围") from exc
+    low = numbers[0]
+    high = numbers[-1]
+    if low < 0 or high < low:
+        raise PipelineError("--grams 范围无效")
+    return low, high
+
+
+def fdc_food_command(args: argparse.Namespace) -> int:
+    profile = load_profile()
+    if args.fdc_id <= 0:
+        raise PipelineError("FDC ID 必须是正整数")
+    if args.cache_days < 0 or args.timeout < 1:
+        raise PipelineError("--cache-days 不能为负，--timeout 必须为正数")
+    request_data = {"fdc_id": args.fdc_id}
+    cache_key = fdc_cache_key("food", request_data)
+    db_path = database_path(profile)
+    source = "cache"
+    fetched_at: str | None = None
+    with NutritionStore(db_path) as store:
+        payload = None
+        if not args.refresh:
+            payload, fetched_at = cached_fdc_payload(
+                store=store, cache_key=cache_key, max_age_days=args.cache_days
+            )
+        if payload is None:
+            if args.offline:
+                raise PipelineError("离线模式下没有可用的 USDA 缓存")
+            key, key_source = fdc_api_key()
+            try:
+                response = food_details(
+                    args.fdc_id, api_key=key, timeout=args.timeout
+                )
+            except FDCError as exc:
+                raise PipelineError(str(exc)) from exc
+            payload = response.payload
+            fetched_at = store.cache_put(
+                cache_key, response.operation, response.request, response.payload
+            )
+            source = "live"
+        else:
+            key_source = "cache"
+    try:
+        food = normalize_food(payload)
+        if args.grams:
+            low, high = parse_grams(args.grams)
+            result: dict[str, Any] = analysis_item_candidate(food, low, high)
+        else:
+            result = food
+    except FDCError as exc:
+        raise PipelineError(str(exc)) from exc
+    envelope = {
+        "meta": {
+            "source": source,
+            "provider": "USDA FoodData Central",
+            "fetched_at": fetched_at,
+            "api_key_source": key_source,
+            "privacy": "Only the numeric FDC ID is sent to USDA; photos remain local.",
+        },
+        "results": result,
+    }
+    if args.agent:
+        print(json.dumps(envelope, ensure_ascii=False, separators=(",", ":")))
+    else:
+        print(json.dumps(envelope, ensure_ascii=False, indent=2))
     return 0
 
 
@@ -1256,7 +1816,26 @@ def doctor(_: argparse.Namespace) -> int:
         paths = paths_for(date.today(), profile)
         print(f"SHORTCUT_NAME={shortcut_name}")
         print(f"DATA_DIR={paths['daily_root']}")
-    except (PipelineError, KeyError) as exc:
+        db_path = database_path(profile)
+        with NutritionStore(db_path) as store:
+            stats = store.database_stats()
+        print(f"DATABASE={db_path}")
+        print(f"DATABASE_SCHEMA={stats['schema_version']}")
+        print(
+            "FDC_AUTO_TEXT_QUERIES="
+            + (
+                "enabled"
+                if profile.get("privacy", {}).get("allow_usda_text_queries") is True
+                else "disabled"
+            )
+        )
+        api_key_source = (
+            "FDC_API_KEY" if os.environ.get("FDC_API_KEY")
+            else "USDA_API_KEY" if os.environ.get("USDA_API_KEY")
+            else "DEMO_KEY"
+        )
+        print(f"FDC_API_KEY_SOURCE={api_key_source}")
+    except (PipelineError, KeyError, RuntimeError, sqlite3.Error) as exc:
         print(f"ERROR={exc}")
         failures += 1
     print(f"DOCTOR={'passed' if failures == 0 else 'failed'}")
@@ -1297,19 +1876,83 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor_parser = subparsers.add_parser("doctor", help="检查本机依赖和配置")
     doctor_parser.set_defaults(func=doctor)
+
+    db_status_parser = subparsers.add_parser(
+        "db-status", help="显示本地 SQLite 营养索引状态"
+    )
+    db_status_parser.add_argument(
+        "--agent", action="store_true", help="输出紧凑的机器可读 JSON"
+    )
+    db_status_parser.set_defaults(func=database_status)
+
+    rebuild_parser = subparsers.add_parser(
+        "rebuild-db", help="从全部 analysis.json 重建 SQLite 营养索引"
+    )
+    rebuild_parser.add_argument(
+        "--agent", action="store_true", help="输出紧凑的机器可读 JSON"
+    )
+    rebuild_parser.set_defaults(func=rebuild_database)
+
+    summary_parser = subparsers.add_parser(
+        "summary", help="生成一个时间窗口的 Markdown/HTML/JSON 营养汇总"
+    )
+    summary_parser.add_argument("--days", type=int, default=7)
+    summary_parser.add_argument("--end", default="today")
+    summary_parser.add_argument(
+        "--agent", action="store_true", help="输出紧凑的机器可读 JSON"
+    )
+    summary_parser.set_defaults(func=nutrition_summary)
+
+    fdc_search_parser = subparsers.add_parser(
+        "fdc-search", help="显式查询 USDA FoodData Central 食物数据"
+    )
+    fdc_search_parser.add_argument("query")
+    fdc_search_parser.add_argument("--limit", type=int, default=5)
+    fdc_search_parser.add_argument("--include-branded", action="store_true")
+    fdc_search_parser.add_argument("--offline", action="store_true")
+    fdc_search_parser.add_argument("--refresh", action="store_true")
+    fdc_search_parser.add_argument("--cache-days", type=int, default=30)
+    fdc_search_parser.add_argument("--timeout", type=int, default=30)
+    fdc_search_parser.add_argument("--agent", action="store_true")
+    fdc_search_parser.set_defaults(func=fdc_search_command)
+
+    fdc_food_parser = subparsers.add_parser(
+        "fdc-food", help="读取 FDC ID，可按克数生成 analysis.json 条目候选"
+    )
+    fdc_food_parser.add_argument("fdc_id", type=int)
+    fdc_food_parser.add_argument("--grams", help="单值 150 或范围 100:150")
+    fdc_food_parser.add_argument("--offline", action="store_true")
+    fdc_food_parser.add_argument("--refresh", action="store_true")
+    fdc_food_parser.add_argument("--cache-days", type=int, default=30)
+    fdc_food_parser.add_argument("--timeout", type=int, default=30)
+    fdc_food_parser.add_argument("--agent", action="store_true")
+    fdc_food_parser.set_defaults(func=fdc_food_command)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
-    commands = {"prepare", "render", "verify", "status", "doctor", "-h", "--help"}
+    commands = {
+        "prepare",
+        "render",
+        "verify",
+        "status",
+        "doctor",
+        "db-status",
+        "rebuild-db",
+        "summary",
+        "fdc-search",
+        "fdc-food",
+        "-h",
+        "--help",
+    }
     if argv and argv[0] not in commands:
         argv.insert(0, "prepare")
     parser = build_parser()
     args = parser.parse_args(argv)
     try:
         return int(args.func(args))
-    except PipelineError as exc:
+    except (PipelineError, sqlite3.Error, RuntimeError) as exc:
         print(f"ERROR={exc}", file=sys.stderr)
         return 2
 

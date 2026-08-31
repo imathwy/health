@@ -18,8 +18,16 @@ When the user asks to analyze food for today, yesterday, or a date:
 4. Inspect every manifest preview. Classify every asset as `consumed_food`, `possible_food`, or `unrelated`.
 5. Apply `diet_context.food_photo_means_consumed` from the local profile. When true, a food or drink photo confirms some consumption, but it does not establish the amount or that the whole portion was eaten.
 6. Reconstruct meals from timestamps and visual context. Pair before/after photos and count repeated angles or Live Photo pairs once.
-7. Write `analysis.json` with range estimates for calories, protein, carbohydrate, fat, fiber, and sodium. State uncertain identity, portion, oil, sauce, and consumed fraction.
-8. Run `./bin/diet render YYYY-MM-DD` and `./bin/diet verify YYYY-MM-DD`. Fix errors until verification passes.
-9. Return links to the dated Markdown and static HTML reports plus the material uncertainty.
+7. Write schema-v2 `analysis.json` with range estimates for calories, protein, carbohydrate, fat, fiber, and sodium. Every item also records `evidence.portion_method` and `evidence.nutrition_source`; optional nutrients are omitted when unknown rather than filled with zero.
+8. Prefer a visible package label, then a verified matching single-food database record, then a wide recipe estimate. Do not map a mixed cafeteria plate to one USDA item or invent a source after estimating from general knowledge.
+9. Run `./bin/diet render YYYY-MM-DD` and `./bin/diet verify YYYY-MM-DD`. Rendering also syncs the private SQLite index. Fix errors until verification passes.
+10. Return links to the dated Markdown and static HTML reports plus the material uncertainty.
 
 Use the targets and health guardrails from the ignored local profile. Do not infer diagnoses or add supplements from one day of photos. Never delete or alter original media. Do not use `--reset-analysis` on meaningful work unless it has first been preserved. Use `--skip-export` only when the user explicitly wants existing files analyzed or when testing downstream code.
+
+## Nutrition data and longitudinal reports
+
+- `analysis.json` is canonical; `data/state/healthlog.sqlite3` is a private, rebuildable index.
+- Use `./bin/diet fdc-search QUERY --agent` and `./bin/diet fdc-food ID --grams LOW:HIGH --agent` only for defensible single-food matches. These commands send text or an ID to USDA; they never send images.
+- Use `./bin/diet rebuild-db` after bulk edits or copying dated analyses.
+- Use `./bin/diet summary --days 7|30 --end DATE` for longitudinal reports. State coverage, never count missing days as zero, and require at least five logged dates before describing interval trends.

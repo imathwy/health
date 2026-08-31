@@ -3,4 +3,5 @@
 set -euo pipefail
 
 project_root=${0:A:h:h}
-exec /usr/bin/env python3 "$project_root/src/healthlog/cli.py" "$@"
+export PYTHONPATH="$project_root/src${PYTHONPATH:+:$PYTHONPATH}"
+exec /usr/bin/env python3 -m healthlog "$@"

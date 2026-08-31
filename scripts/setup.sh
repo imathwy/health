@@ -49,6 +49,8 @@ fi
   "$project_root/config" \
   "$project_root/data/daily" \
   "$project_root/data/medical" \
+  "$project_root/data/reports/nutrition" \
+  "$project_root/data/state" \
   "$project_root/data/supplements" \
   "$project_root/build/shortcuts"
 

@@ -6,11 +6,23 @@ build-backend = "setuptools.build_meta"
 name = "local-healthlog"
 version = "0.6.0"
 description = "Local-first Apple Photos nutrition logging, provenance, and trends"
+readme = "README.md"
 requires-python = ">=3.10"
+license = {file = "LICENSE"}
 dependencies = []
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+]
 
 [project.scripts]
 diet = "healthlog.cli:main"
+
+[project.urls]
+Repository = "https://github.com/imathwy/health"
+Issues = "https://github.com/imathwy/health/issues"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

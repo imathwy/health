@@ -35,6 +35,9 @@ venv/
 # Python, test, and editor state
 __pycache__/
 *.py[cod]
+*.egg-info/
+.eggs/
+dist/
 .pytest_cache/
 .coverage
 htmlcov/

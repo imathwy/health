@@ -2,6 +2,8 @@
 
 Local HealthLog independently implements its pipeline with Python's standard library. It does not vendor an upstream nutrition CLI. The following public Skills informed interface choices:
 
+The repository's MIT License covers its original implementation and documentation only. Linked upstream projects retain their own licenses; their code and Skill text are not redistributed here.
+
 | Upstream | Reused design idea | Deliberate difference here |
 |---|---|---|
 | [NousResearch `fitness-nutrition`](https://github.com/NousResearch/hermes-agent/blob/main/optional-skills/health/fitness-nutrition/SKILL.md) (MIT) | USDA FoodData Central lookup, per-100-g composition, and scaling to actual grams | Lookup is optional, cached locally, emits analysis-v2 provenance, and is restricted to defensible food/preparation matches. |

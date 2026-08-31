@@ -37,7 +37,7 @@ HEIC preview generation prefers ImageMagick and falls back to the macOS `sips`
 tool. The runtime has no third-party Python dependencies.
 
 ```bash
-git clone <repository-url> local-healthlog
+git clone https://github.com/imathwy/health.git local-healthlog
 cd local-healthlog
 ./scripts/setup.sh --open-shortcut
 ```
@@ -219,3 +219,9 @@ domain/adapters`. The `analysis`, `nutrition`, and `summary` domain modules do
 not import filesystem, media, presentation, SQLite, or network adapters. See
 the [architecture document](docs/architecture.md) for module ownership and the
 dependency graph.
+
+## License
+
+Original code and documentation in this repository are available under the
+[MIT License](LICENSE). Referenced upstream projects retain their own licenses;
+none of their implementations are vendored here.

@@ -27,7 +27,7 @@ flowchart LR
 要求：macOS、Python 3.10+、系统自带的 `shortcuts`。HEIC 预览优先使用 ImageMagick，未安装时回退到 macOS `sips`。运行时没有第三方 Python 依赖。
 
 ```bash
-git clone <repository-url> local-healthlog
+git clone https://github.com/imathwy/health.git local-healthlog
 cd local-healthlog
 ./scripts/setup.sh --open-shortcut
 ```
@@ -165,3 +165,8 @@ Git 只应包含代码、文档、示例配置和 Skill。个人档案、照片�
 应用代码遵循单向依赖：`cli → commands → domain/adapters`，领域模块
 `analysis / nutrition / summary` 不反向导入文件系统、媒体、网页、SQLite
 或网络适配器。具体职责和依赖图见 [架构](docs/architecture.md)。
+
+## 许可证
+
+本仓库的原创代码和文档采用 [MIT 许可证](LICENSE)。文中引用的上游项目仍适用
+各自的许可证；本仓库没有打包或复制它们的实现。

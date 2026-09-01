@@ -49,23 +49,28 @@ fi
 /bin/mkdir -p \
   "$project_root/config" \
   "$project_root/data/daily" \
-  "$project_root/data/medical" \
+  "$project_root/data/profiles" \
   "$project_root/data/supplements" \
   "$project_root/runtime/daily" \
+  "$project_root/runtime/profile" \
   "$project_root/runtime/reports/nutrition" \
   "$project_root/runtime/state" \
   "$project_root/site/daily" \
   "$project_root/site/health/assets" \
   "$project_root/site/nutrition" \
+  "$project_root/site/profile" \
   "$project_root/build/shortcuts"
 
 if [[ ! -f "$project_root/config/health_profile.json" ]]; then
   /bin/cp "$project_root/config/health_profile.example.json" \
     "$project_root/config/health_profile.json"
-  print -- "Created config/health_profile.json; edit its targets before relying on reports."
+  print -- "Created private operational settings at config/health_profile.json."
 else
   print -- "Kept existing config/health_profile.json."
 fi
+
+"$project_root/bin/diet" profile-init
+"$project_root/bin/diet" profile
 
 if [[ -d "$project_root/.git" ]]; then
   git -C "$project_root" config core.hooksPath .githooks
@@ -118,4 +123,4 @@ if $build_shortcut && ! $open_shortcut; then
   print -- "Import the Shortcut once with:"
   print -- "  open '$signed_shortcut'"
 fi
-print -- "Then edit config/health_profile.json and run: diet yesterday"
+print -- "Then edit the generated PROFILE_JSON, run 'diet profile', and analyze a day with: diet yesterday"

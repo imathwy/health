@@ -22,6 +22,7 @@ from .commands import (
     verify,
 )
 from .errors import PipelineError
+from .profile_workflow import initialize_personal_profile, personal_profile_command
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -58,6 +59,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor_parser = subparsers.add_parser("doctor", help="检查本机依赖和配置")
     doctor_parser.set_defaults(func=doctor)
+
+    profile_init_parser = subparsers.add_parser(
+        "profile-init", help="初始化活动用户的私有个人档案与病历索引"
+    )
+    profile_init_parser.add_argument(
+        "--migrate-config",
+        action="store_true",
+        help="备份 schema-v1 配置，并把个人信息迁入 durable profile",
+    )
+    profile_init_parser.set_defaults(func=initialize_personal_profile)
+
+    profile_parser = subparsers.add_parser(
+        "profile", help="校验个人档案并生成私有静态简介页"
+    )
+    profile_parser.set_defaults(func=personal_profile_command)
 
     db_status_parser = subparsers.add_parser(
         "db-status", help="显示本地 SQLite 营养索引状态"
@@ -125,6 +141,8 @@ def main(argv: list[str] | None = None) -> int:
         "verify",
         "status",
         "doctor",
+        "profile-init",
+        "profile",
         "db-status",
         "rebuild-db",
         "summary",

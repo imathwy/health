@@ -1,15 +1,16 @@
 ---
 name: daily-diet-pipeline
-description: Run the repository's local Apple Photos diet workflow for today, yesterday, or a date; create or repair schema-v3 meal and health tracking with explicit provenance; render and verify Markdown/HTML; query USDA FoodData Central for suitable single foods; or generate local 7/30-day SQLite summaries. Do not use for unrelated general nutrition questions.
+description: Run the repository's local Apple Photos diet workflow; initialize, validate, or render its private personal profile and medical-record index; create or repair schema-v3 meal and health tracking with explicit provenance; query USDA FoodData Central; or generate local 7/30-day summaries. Do not use for unrelated general nutrition questions.
 ---
 
 # Daily Diet Pipeline
 
-Use the repository as the executable source of truth. Find its root by locating `bin/diet`, `config/health_profile.json`, and `src/healthlog/cli.py`, then run commands from that root. Read the ignored local profile before interpreting food, setting targets, or discussing supplements.
+Use the repository as the executable source of truth. Find its root by locating `bin/diet`, `config/health_profile.json`, and `src/healthlog/cli.py`, then run commands from that root. The config selects an active profile and owns operational/privacy settings. Read the canonical `data/profiles/<active_profile_id>/profile.json` before interpreting food, setting targets, or discussing supplements; read its `medical/index.json` when medical history changes the interpretation.
 
 ## Choose the workflow
 
 - Dated food-photo analysis: follow **Daily analysis**.
+- Personal background, health status, or past medical records: follow **Personal profile**.
 - Existing report is stale or broken: run `./bin/diet status DATE`, then repair the earliest failing stage.
 - 7/30-day pattern review: follow **Longitudinal summary**.
 - Exact single-food composition or gram scaling: follow **FoodData Central lookup**.
@@ -19,8 +20,10 @@ Use the repository as the executable source of truth. Find its root by locating 
 
 1. Resolve `today`, `yesterday`, or the requested `YYYY-MM-DD` in local time.
 2. Run `./bin/diet prepare DATE`. Use `--skip-export` only when the user explicitly wants existing files analyzed or while testing downstream code.
-3. Read `config/health_profile.json`, the canonical
-   `data/daily/YYYYMMDD/analysis.json`, and the generated
+3. Read the active ID and paths from `config/health_profile.json`; read the
+   canonical personal profile and medical index under
+   `data/profiles/<active_profile_id>/`; then read the canonical
+   `data/daily/YYYYMMDD/analysis.json` and the generated
    `runtime/daily/YYYYMMDD/pipeline/manifest.json` plus
    `analysis.template.json`.
 4. Inspect every manifest asset through its `preview_path`, which resolves into the private `site/` display tree. If a preview failed, inspect the original with another supported local viewer. Do not sample.
@@ -33,9 +36,34 @@ Use the repository as the executable source of truth. Find its root by locating 
 11. Return links to `site/index.html`, the dated runtime Markdown and site HTML, the
     energy/protein intervals, and the largest uncertainty.
 
+## Personal profile
+
+1. Run `./bin/diet profile-init` if the active profile is missing. On an old
+   schema-v1 workspace, `./bin/diet profile-init --migrate-config` first saves a
+   private backup and then removes personal facts from operational settings.
+2. Read `data/profiles/<profile_id>/profile.json` and
+   `medical/index.json`. Load `references/personal-profile-schema.md` before
+   adding or restructuring fields.
+3. Put raw examinations, PDFs, or images only under
+   `medical/files/`. Refer to them from the index with `files/...` relative
+   paths. Never place a raw document in runtime or site.
+4. Distinguish user-reported context from medical-record findings. Do not turn
+   an unreviewed symptom into a diagnosis. An empty medicines or allergies list
+   means unregistered unless the user explicitly confirmed none.
+5. Link a condition or symptom to a medical record through `record_ids`; do not
+   paste the full document into profile JSON. Preserve an existing original and
+   verify its hash when relocating it.
+6. After editing either document, update `updated_at` and
+   `provenance.last_reviewed` when appropriate, run `./bin/diet profile`, and
+   fix every validation error. The command rebuilds
+   `runtime/profile/profile.snapshot.json`, `site/profile/index.html`, and the
+   portal entry.
+7. Return the local profile page and state material unknowns. Do not expose raw
+   medical-file links in HTML.
+
 ## Interpret photo evidence
 
-- Apply `diet_context.food_photo_means_consumed` from the local profile. When true, a food or drink photo confirms some consumption, including a package-only photo. It does not establish quantity or that the full visible portion was eaten.
+- Apply `diet_context.food_photo_means_consumed` from the canonical personal profile. When true, a food or drink photo confirms some consumption, including a package-only photo. It does not establish quantity or that the full visible portion was eaten.
 - Prefer user-provided weights, counts, or consumed fractions. Next prefer before/after evidence. Otherwise use a wide visual portion range.
 - The food-related screening set is `consumed_food` plus `possible_food`, but only `consumed_food` enters meal reconstruction and nutrient totals. Use `possible_food` when the image may not represent the user's intake; use `unrelated` for non-food media. Never leave `unreviewed` in a final analysis.
 - Record visible facts in `observations`. Put uncertain identity, recipe, oil, sauce, shared amount, and consumed fraction in `uncertainties`.
@@ -92,7 +120,7 @@ Load `references/nutrition-sources.md` for the decision table and lookup command
 
 ## FoodData Central lookup
 
-The CLI sends only a text query or numeric FDC ID; images stay local. Use remote lookup only when the user explicitly requests it or `privacy.allow_usda_text_queries` is true in the local profile.
+The CLI sends only a text query or numeric FDC ID; images stay local. Use remote lookup only when the user explicitly requests it or `privacy.allow_usda_text_queries` is true in local operational settings.
 
 ```bash
 ./bin/diet fdc-search "salmon cooked" --limit 5 --agent
@@ -131,7 +159,9 @@ The report must:
 
 ## Health and supplement guardrails
 
-- Use targets and contraindication notes from the local profile.
+- Use targets, current conditions, medicines, allergies, and contraindication
+  notes from the canonical personal profile. Use the medical index to preserve
+  provenance; do not treat its summary as a fresh diagnosis.
 - Do not diagnose disease or infer deficiency from food photos.
 - Do not add a supplement from one day or from an unmeasured micronutrient.
 - Prefer food-structure changes for ordinary energy, protein, fiber, and sodium gaps.

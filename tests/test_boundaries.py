@@ -7,7 +7,12 @@ from pathlib import Path
 from healthlog.errors import PipelineError
 from healthlog.media import manifest_preview_path
 from healthlog.presentation import audit_static_html
-from healthlog.workspace import WorkspacePaths, paths_for
+from healthlog.workspace import (
+    PersonalProfilePaths,
+    WorkspacePaths,
+    paths_for,
+    personal_profile_paths,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -41,6 +46,8 @@ class LayerBoundaryTests(unittest.TestCase):
             "fdc",
             "media",
             "presentation",
+            "profile_presentation",
+            "profile_workflow",
             "store",
             "workspace",
         }
@@ -48,6 +55,7 @@ class LayerBoundaryTests(unittest.TestCase):
         for module_name in (
             "analysis",
             "nutrition",
+            "personal_profile",
             "tracking",
             "tracking_summary",
             "summary",
@@ -63,6 +71,20 @@ class LayerBoundaryTests(unittest.TestCase):
         self.assertEqual(paths.report_md.suffix, ".md")
         self.assertEqual(paths.report_html.suffix, ".html")
         self.assertNotEqual(paths.runtime_root, paths.site_root)
+
+    def test_personal_profile_paths_are_scoped_to_the_active_owner(self) -> None:
+        settings = profile()
+        settings["active_profile_id"] = "researcher-1"
+
+        paths = personal_profile_paths(settings)
+
+        self.assertIsInstance(paths, PersonalProfilePaths)
+        self.assertEqual(
+            paths.profile_json.relative_to(PROJECT_ROOT).as_posix(),
+            "data/profiles/researcher-1/profile.json",
+        )
+        self.assertEqual(paths.medical_index.name, "index.json")
+        self.assertEqual(paths.site_html.relative_to(PROJECT_ROOT).as_posix(), "site/profile/index.html")
 
     def test_rejects_overlapping_private_roots(self) -> None:
         with self.assertRaisesRegex(PipelineError, "互不包含"):

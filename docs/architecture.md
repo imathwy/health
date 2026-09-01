@@ -9,16 +9,18 @@ The repository has six explicit boundaries:
    Apple Shortcut. Python does not request Photos access; the Shortcut owns that
    permission and writes directly into `data/daily/`.
 3. **Durable private records** — `data/daily/YYYYMMDD/` contains unmodified media
-   and the human-reviewed `analysis.json`. `data/medical/` and
-   `data/supplements/` hold the other user-owned health records. Back up this
-   layer.
+   and the human-reviewed `analysis.json`.
+   `data/profiles/<profile_id>/profile.json` is the personal source of truth;
+   its `medical/index.json` describes untouched originals under
+   `medical/files/`. `data/supplements/` holds the remaining user-owned health
+   records. Back up this layer.
 4. **Rebuildable private runtime** — `runtime/` contains manifests, analysis
    templates, Markdown/JSON reports, SQLite indexes, and the USDA cache. It can
    be removed and recreated from `data/` plus the local profile.
 5. **Private presentation layer** — `site/` is the only browser-facing tree. It
-   contains the portal, health/supplement page, daily HTML, JPEG previews, and
-   longitudinal HTML. Dated outputs are rebuildable; locally authored health
-   presentation files should be backed up.
+   contains the portal, generated profile summary, health/supplement page, daily
+   HTML, JPEG previews, and longitudinal HTML. Dated/profile outputs are
+   rebuildable; locally authored health presentation files should be backed up.
 6. **Developer build output** — `build/` contains signed Shortcut artifacts and
    temporary test/build output. It is never a data source.
 
@@ -27,19 +29,24 @@ The repository has six explicit boundaries:
 | Layer | Modules | Ownership |
 |---|---|---|
 | Entry adapter | `cli`, `__main__` | Parse arguments, route commands, translate expected failures to exit codes |
-| Application | `commands` | Orchestrate dated workflows and compose ports/adapters |
-| Domain | `analysis`, `nutrition`, `tracking`, `tracking_summary`, `summary` | Analysis schema, nutrient vocabulary, interval math, daily observations, meal-derived metrics, validation, target comparison, longitudinal summaries |
-| External adapters | `workspace`, `media`, `presentation`, `store`, `fdc` | Filesystem/config, Shortcuts and previews, Markdown/HTML, SQLite, USDA HTTP |
+| Application | `commands`, `profile_workflow` | Orchestrate dated and personal-profile workflows; compose ports/adapters |
+| Domain | `analysis`, `nutrition`, `tracking`, `tracking_summary`, `personal_profile`, `summary` | Analysis and personal/medical schemas, nutrient vocabulary, interval math, daily observations, meal-derived metrics, validation, target comparison, longitudinal summaries |
+| External adapters | `workspace`, `media`, `presentation`, `profile_presentation`, `store`, `fdc` | Filesystem/config, Shortcuts and previews, daily/portal HTML, personal-profile HTML, SQLite, USDA HTTP |
 | Foundation | `errors` | Stable application error shared by inward and outward layers |
 
 ```mermaid
 flowchart TD
     CLI[cli / __main__] --> APP[commands]
+    CLI --> PROFILEAPP[profile_workflow]
     APP --> ANALYSIS[analysis]
+    APP --> PROFILEAPP
+    PROFILEAPP --> PROFILE[personal_profile]
     APP --> SUMMARY[summary]
     APP --> WORKSPACE[workspace]
     APP --> MEDIA[media]
     APP --> PRESENTATION[presentation]
+    PROFILEAPP --> PROFILEVIEW[profile_presentation]
+    PROFILEAPP --> PRESENTATION
     APP --> STORE[store]
     APP --> FDC[fdc]
     ANALYSIS --> NUTRITION[nutrition]
@@ -54,6 +61,8 @@ flowchart TD
     PRESENTATION --> ANALYSIS
     PRESENTATION --> MEDIA
     PRESENTATION --> WORKSPACE
+    PROFILEVIEW --> PROFILE
+    WORKSPACE --> PROFILE
     WORKSPACE --> ERRORS[errors]
     MEDIA --> ERRORS
     PRESENTATION --> ERRORS
@@ -66,6 +75,13 @@ replace string-keyed path and view dictionaries where ownership matters. Large
 HTML templates remain cohesive rendering functions because splitting static
 markup into many tiny helpers would obscure rather than improve the boundary.
 
+`config/health_profile.json` is an operational selector despite its legacy
+filename. Schema v2 keeps the active profile ID, privacy switch, Shortcut name,
+and roots there. `workspace.load_profile()` validates and projects the canonical
+durable profile into the existing analysis context, so daily code has one source
+for demographics, targets, diet context, and health guardrails. Schema-v1 files
+remain readable long enough to run the explicit migration.
+
 ```mermaid
 flowchart LR
     A[Date] --> B[Apple Shortcut]
@@ -76,6 +92,7 @@ flowchart LR
     P --> E
     E --> S[Food relevance screening]
     S --> N[Meal reconstruction and nutrition]
+    K[data/profiles: personal context] --> N
     U[Optional USDA text or ID query] --> N
     N --> F[data/daily: analysis.json v3]
     F --> G[runtime/daily: Markdown]
@@ -86,6 +103,8 @@ flowchart LR
     W --> J[site/index.html: local portal]
     T --> J
     I --> J
+    K --> Q[site/profile: validated summary]
+    Q --> J
 ```
 
 The two uncertainties in each item stay separate: `portion_method` explains how

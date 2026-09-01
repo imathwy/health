@@ -2,7 +2,7 @@
 
 **简体中文** | [English](README.md)
 
-Local HealthLog 是一套 macOS 本地优先的饮食记录流水线：Apple Shortcut 按日期导出照片，Codex 检查全部图片并生成带不确定区间和来源记录的 `analysis.json`，随后产出静态 Markdown/HTML、同步本地 SQLite，并通过统一健康门户切换补剂、每日饮食和 7/30 天汇总。
+Local HealthLog 是一套 macOS 本地优先的健康与饮食记录流水线：Apple Shortcut 按日期导出照片，Codex 检查全部图片并生成带不确定区间和来源记录的 `analysis.json`，随后产出静态 Markdown/HTML、同步本地 SQLite，并通过统一健康门户切换个人档案、补剂、每日饮食和 7/30 天汇总。
 
 ```mermaid
 flowchart LR
@@ -14,6 +14,7 @@ flowchart LR
     P --> E
     E --> S[筛选食物相关照片]
     S --> N[重建餐次与营养估算]
+    X[私有个人档案与病历索引] --> N
     U[可选 USDA 文本查询] --> N
     N --> F[analysis.json v3]
     F --> G[runtime: Markdown / JSON]
@@ -38,17 +39,28 @@ cd local-healthlog
 
 脚本会：
 
-- 从安全模板创建被忽略的 `config/health_profile.json`；
+- 从安全模板创建被忽略的运行配置 `config/health_profile.json`，并初始化活动用户的长期个人档案；
 - 创建长期记录目录 `data/`、机器运行目录 `runtime/` 与网页展示目录 `site/`；
 - 可选安装 `diet` 与 Codex Skill 的用户级链接；
 - 为当前 clone 的绝对路径构建并签名 Shortcut；
 - 初始化私有 SQLite 并运行环境检查。
 
-Apple 要求首次手工导入 Shortcut，并允许它读取 Photos。完成后编辑本地健康档案中的目标值。纯代码或 CI 式检查可以运行：
+Apple 要求首次手工导入 Shortcut，并允许它读取 Photos。完成后编辑初始化输出中的 `PROFILE_JSON`，再运行 `diet profile` 校验并重建私有页面。纯代码或 CI 式检查可以运行：
 
 ```bash
 ./scripts/setup.sh --no-install --skip-shortcut
 ```
+
+## 个人档案与往期病历
+
+每个工作区只激活一个本地用户。运行配置保存稳定的 `profile_id` 和目录、隐私开关；人口学信息、身体基线、目标、生活方式、当前健康状况与补剂边界统一保存在 `data/profiles/<profile_id>/profile.json`。往期病历的结构化索引位于 `medical/index.json`，未经修改的 PDF 或图片原件位于 `medical/files/`。
+
+```bash
+diet profile-init             # 创建缺失的私有档案和病历索引
+diet profile                  # 校验并重建个人简介页与门户
+```
+
+旧 schema-v1 工作区可以运行 `diet profile-init --migrate-config`：命令会先在私有档案中保存旧配置备份，再把个人事实从运行配置迁出。生成的 `site/profile/index.html` 展示身体状况、疾病或症状、药物、过敏、活动、目标和病历时间线；它只显示原件数量，不写入原件名称、路径或链接。详见 [个人档案边界](docs/personal-profile.md)。
 
 ## 每日分析
 
@@ -69,7 +81,7 @@ diet dashboard
 
 `diet yesterday` 是 `diet prepare yesterday` 的缩写。Shortcut 只能直接写入 `data/daily/YYYYMMDD/`；CLI 会拒绝根目录别名或符号链接返回的路径。`render` 将 Markdown 写入 `runtime/`、HTML 与网页图片写入 `site/`，并同步统一门户和 SQLite；`verify` 会检查原图哈希、预览、schema、静态链接、目录边界、报告、门户和数据库哈希。
 
-本地入口是 `site/index.html`。它按“总览 → 健康计划 / 每日饮食 / 长期趋势 → 详细报告”分层，并在一个页面内切换健康与补剂、最近一天、全部日期、7 天和 30 天报告。所有浏览器页面及其专用图片集中在 `site/`；页面不加载外部脚本、字体或图片，“单独打开”可脱离门户查看当前报告。
+本地入口是 `site/index.html`。它按“总览 → 个人档案 / 健康计划 / 每日饮食 / 长期趋势 → 详细报告”分层，并在一个页面内切换个人简介与病历、健康与补剂、最近一天、全部日期、7 天和 30 天报告。所有浏览器页面及其专用图片集中在 `site/`；页面不加载外部脚本、字体或图片，“单独打开”可脱离门户查看当前报告。
 
 Schema v3 继续为每个食物条目分开记录：
 
@@ -80,7 +92,7 @@ Schema v3 继续为每个食物条目分开记录：
 
 它还增加一组有明确证据边界的执行指标：每日直接饮水量、钙摄入、睡眠、咖啡因、训练时长/RPE、蔬菜水果、体重与围度，以及铁/钙补剂时序。每餐蛋白质直接从食物条目汇总；血红素铁和油性鱼按已复核餐次计数。未提供的数据保持 `null`，照片覆盖不完整时频次只是确认下限。
 
-公开模板给 19–50 岁成人设置 1,000 mg 钙、成年男性基础直接饮水 1,700 mL、每餐蛋白质 20–40 g 等参考值；本地档案可覆盖。普通混合膳食不会被标成“铁钙冲突”，主要检查单独铁剂是否与钙剂同服；高钙食物是否需要错开则按铁剂标签或医生要求。指标定义、测量条件和依据见 [追踪指标规则](docs/tracking-metrics.md)。
+公开个人档案示例给 19–50 岁成人设置 1,000 mg 钙、成年男性基础直接饮水 1,700 mL、每餐蛋白质 20–40 g 等参考值；本地档案可覆盖。普通混合膳食不会被标成“铁钙冲突”，主要检查单独铁剂是否与钙剂同服；高钙食物是否需要错开则按铁剂标签或医生要求。指标定义、测量条件和依据见 [追踪指标规则](docs/tracking-metrics.md)。
 
 ## 可选 USDA FoodData Central
 
@@ -127,31 +139,39 @@ diet db-status
 ├── bin/diet                     # clone-local CLI
 ├── config/
 │   ├── health_profile.example.json
-│   └── health_profile.json      # 私密、忽略
+│   ├── personal_profile.example.json
+│   └── health_profile.json      # 私有运行配置、忽略
 ├── data/                        # 长期私有记录、忽略
 │   ├── daily/YYYYMMDD/          # 原始媒体 + canonical analysis.json
-│   ├── medical/
+│   ├── profiles/<id>/
+│   │   ├── profile.json         # 个人与健康上下文主档案
+│   │   └── medical/             # index.json + 原样 files/
 │   └── supplements/
 ├── runtime/                     # 可删除重建的私有产物、忽略
 │   ├── daily/YYYYMMDD/          # manifest、分析模板、每日 Markdown
+│   ├── profile/                 # 通过校验的 agent 档案快照
 │   ├── reports/nutrition/       # 7/30 天 JSON 与 Markdown
 │   └── state/healthlog.sqlite3  # SQLite 索引与 USDA 缓存
 ├── site/                        # 私有网页展示层、忽略
 │   ├── index.html               # 统一静态健康门户
+│   ├── profile/                 # 个人状态与病历时间线 HTML
 │   ├── health/                  # 健康与补剂 HTML、网页资产
 │   ├── daily/YYYYMMDD/          # 每日 HTML 与 JPEG 预览
 │   └── nutrition/               # 7/30 天 HTML
 ├── src/healthlog/               # 分层应用代码
 │   ├── cli.py                   # 参数解析与退出码
 │   ├── commands.py              # 用例编排
+│   ├── profile_workflow.py      # 个人档案迁移与展示用例
 │   ├── analysis.py              # 分析 schema、验证与目标比较
 │   ├── nutrition.py             # 营养领域词汇与区间聚合
 │   ├── tracking.py              # 饮水、钙、恢复、体测与餐次派生指标
 │   ├── tracking_summary.py      # 扩展指标的长期聚合与覆盖规则
 │   ├── summary.py               # 长期汇总领域逻辑
+│   ├── personal_profile.py      # 个人档案/病历 schema 与校验
 │   ├── workspace.py             # 配置、路径边界与原子文件 I/O
 │   ├── media.py                 # Shortcut、媒体清单与预览
 │   ├── presentation.py          # Markdown、HTML 与本地门户
+│   ├── profile_presentation.py  # 私有个人档案 HTML 适配器
 │   ├── store.py                 # 可重建 SQLite 适配器
 │   └── fdc.py                   # USDA FoodData Central 适配器
 ├── tests/                       # 无个人数据的标准库测试
@@ -173,7 +193,7 @@ Git 只应包含代码、文档、示例配置和 Skill。个人档案、照片�
 本项目从现有营养 Skills 借鉴了接口思想，并独立实现了适合照片证据的来源模型；取舍与许可证见 [上游设计审查](docs/upstream-inspirations.md)。
 
 应用代码遵循单向依赖：`cli → commands → domain/adapters`，领域模块
-`analysis / nutrition / tracking / tracking_summary / summary` 不反向导入文件系统、媒体、网页、SQLite
+`analysis / nutrition / tracking / tracking_summary / personal_profile / summary` 不反向导入文件系统、媒体、网页、SQLite
 或网络适配器。具体职责和依赖图见 [架构](docs/architecture.md)。
 
 ## 许可证

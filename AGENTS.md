@@ -5,8 +5,13 @@ This repository separates reusable source from private health data. Never transm
 ## Project boundaries
 
 - Reusable source: `src/`, `bin/`, `scripts/`, `skills/`, `docs/`, and the example config.
-- Durable private records: `config/health_profile.json` and `data/`. Original
-  media and `analysis.json` stay here and should be backed up.
+- Private operational settings: `config/health_profile.json` selects one active
+  `profile_id` and controls paths, privacy, and the Shortcut. It must not become
+  a second source for personal facts.
+- Durable private records: `data/`. The canonical personal context is
+  `data/profiles/<profile_id>/profile.json`; its structured medical index and
+  raw records live under the same profile. Original food media and
+  `analysis.json` stay in `data/daily/`. Back up this layer.
 - Rebuildable private runtime: `runtime/`. Manifests, Markdown/JSON reports,
   SQLite, and caches belong here; HTML does not.
 - Private web display: `site/`. All browser-facing HTML and display-only images
@@ -25,14 +30,16 @@ This repository separates reusable source from private health data. Never transm
 
 - `cli.py` only parses arguments, selects a command, and maps `PipelineError` to
   an exit code. Put workflow behavior in `commands.py`.
-- `commands.py` orchestrates use cases. It may compose domain code and adapters,
-  but adapters must not import it.
-- `analysis.py`, `nutrition.py`, `tracking.py`, `tracking_summary.py`, and
-  `summary.py` are the domain layer. They must
+- `commands.py` orchestrates dated nutrition use cases; `profile_workflow.py`
+  orchestrates personal-profile initialization, migration, validation, and
+  rendering. They may compose domain code and adapters, but adapters must not
+  import them.
+- `analysis.py`, `nutrition.py`, `tracking.py`, `tracking_summary.py`,
+  `personal_profile.py`, and `summary.py` are the domain layer. They must
   not import CLI, filesystem, media, presentation, network, or SQLite adapters.
-- `workspace.py`, `media.py`, `presentation.py`, `store.py`, and `fdc.py` own
-  configuration/filesystem, Photos/preview, static display, SQLite, and USDA
-  boundaries respectively.
+- `workspace.py`, `media.py`, `presentation.py`, `profile_presentation.py`,
+  `store.py`, and `fdc.py` own configuration/filesystem, Photos/preview, static
+  display, personal-profile display, SQLite, and USDA boundaries respectively.
 - Preserve these import rules in `tests/test_boundaries.py`. Prefer a focused
   module or immutable value object over adding another responsibility to an
   existing large module.
@@ -43,7 +50,9 @@ When the user asks to analyze food for today, yesterday, or a date:
 
 1. Resolve the date in the local timezone.
 2. Run `./bin/diet prepare YYYY-MM-DD` so the configured Shortcut exports Apple Photos and creates a manifest plus JPEG previews.
-3. Read `config/health_profile.json`, the canonical analysis under
+3. Read `config/health_profile.json` only for the active ID, privacy, and paths.
+   Read the canonical personal context and medical index under
+   `data/profiles/<active_profile_id>/`, the canonical analysis under
    `data/daily/YYYYMMDD/`, and the generated manifest/template under
    `runtime/daily/YYYYMMDD/pipeline/`.
 4. Inspect every manifest preview under `site/daily/YYYYMMDD/assets/`; never sample. Classify every asset as `consumed_food`, `possible_food`, or `unrelated` before estimating nutrition.
@@ -57,7 +66,34 @@ When the user asks to analyze food for today, yesterday, or a date:
 12. Return links to `site/index.html`, the dated runtime Markdown and site HTML,
     plus the material uncertainty.
 
-Use the targets and health guardrails from the ignored local profile. Do not infer diagnoses or add supplements from one day of photos. Never delete or alter original media. Do not use `--reset-analysis` on meaningful work unless it has first been preserved. Use `--skip-export` only when the user explicitly wants existing files analyzed or when testing downstream code.
+Use targets and health guardrails from the canonical durable personal profile.
+Do not infer diagnoses or add supplements from one day of photos. Never delete
+or alter original media. Do not use `--reset-analysis` on meaningful work unless
+it has first been preserved. Use `--skip-export` only when the user explicitly
+wants existing files analyzed or when testing downstream code.
+
+## Personal profile and medical history
+
+- Run `./bin/diet profile-init` when the active profile documents are absent.
+  For a schema-v1 workspace, use `--migrate-config` only when migration is part
+  of the requested work; it first preserves the legacy document under the
+  profile's ignored `migrations/` directory.
+- Treat `data/profiles/<profile_id>/profile.json` as the source of truth for
+  demographics, current status, goals, activity, nutrition targets, diet
+  context, conditions, symptoms, medicines, allergies, and guardrails.
+- Put raw medical files only in
+  `data/profiles/<profile_id>/medical/files/`. Register each one in
+  `medical/index.json` with a safe `files/...` relative path. Conditions and
+  symptoms may reference record IDs; do not duplicate raw document contents.
+- Do not interpret an empty medicines or allergies list as a confirmed absence;
+  the generated page labels it as unregistered. Preserve whether a fact is
+  user-reported or supported by a medical record.
+- Open a raw record only when the user asks for it or a required fact cannot be
+  resolved from the structured index. Never copy raw records or clickable raw
+  paths into `site/`.
+- After editing either canonical document, run `./bin/diet profile` and then
+  `./bin/diet dashboard`. Fix validation errors and stale record references
+  before using the profile for health interpretation.
 
 ## Nutrition data and longitudinal reports
 

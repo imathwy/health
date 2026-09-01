@@ -5,7 +5,10 @@ the durable private record layer and should be backed up. `scripts/setup.sh`
 creates these subdirectories:
 
 - `daily/YYYYMMDD/`: original Apple Photos exports and canonical `analysis.json`
-- `medical/`: private examination records
+- `profiles/<profile_id>/profile.json`: canonical demographics, body baseline,
+  goals, activity, targets, diet context, and health status
+- `profiles/<profile_id>/medical/`: structured `index.json` and untouched
+  originals under `files/`
 - `supplements/`: private supplement photos and reports
 
 Generated manifests, Markdown/JSON, and SQLite state belong in `runtime/`;

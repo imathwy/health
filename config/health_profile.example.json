@@ -1,75 +1,13 @@
 {
-  "schema_version": 1,
-  "profile": {
-    "label": "local-user",
-    "age_years": null,
-    "sex": "unspecified",
-    "height_cm": null,
-    "weight_kg": null,
-    "goals": ["maintain"],
-    "activity": {
-      "work_pattern": "",
-      "strength_sessions_per_week": "",
-      "tennis_hours_per_week": 0,
-      "swimming_hours_per_week": 0
-    }
-  },
-  "targets": {
-    "energy_kcal": {
-      "unknown": [2000, 2400],
-      "rest": [1900, 2300],
-      "strength": [2100, 2500],
-      "swim": [2100, 2500],
-      "tennis": [2200, 2700],
-      "mixed": [2300, 2800]
-    },
-    "protein_g": [90, 130],
-    "carbohydrate_g": {
-      "unknown": [220, 320],
-      "rest": [200, 280],
-      "strength": [240, 340],
-      "swim": [240, 340],
-      "tennis": [280, 380],
-      "mixed": [300, 420]
-    },
-    "fat_g": [55, 80],
-    "fiber_g": [25, 35],
-    "sodium_mg_max": 2000,
-    "water_l_base": 1.7,
-    "tracking": {
-      "protein_per_meal_g": [20, 40],
-      "direct_water_ml_base": 1700,
-      "calcium_mg_target": 1000,
-      "sleep_hours_min": 7,
-      "caffeine_mg_max": 400,
-      "vegetables_g_min": 300,
-      "fruit_g_min": 200
-    }
-  },
-  "diet_context": {
-    "food_photo_means_consumed": true,
-    "photo_logging_convention": "A dated food or drink photo means some amount was consumed; it does not prove the whole visible portion was eaten, and repeated angles count once.",
-    "usual_breakfast": "",
-    "usual_lunch_dinner": "",
-    "usual_snacks": "",
-    "oily_fish_frequency": "",
-    "milk_whey_trial": ""
-  },
-  "health_context": {
-    "digestive": "",
-    "skin": "",
-    "sleep": "",
-    "caffeine": "",
-    "supplement_guardrails": [
-      "Do not infer a deficiency or add a supplement from one day of food photos."
-    ]
-  },
+  "schema_version": 2,
+  "active_profile_id": "local-user",
   "privacy": {
     "allow_usda_text_queries": false
   },
   "pipeline": {
     "shortcut_name": "HealthLog 导出每日照片",
     "daily_records_directory": "data/daily",
+    "profile_records_directory": "data/profiles",
     "runtime_directory": "runtime",
     "site_directory": "site",
     "report_language": "zh-CN"

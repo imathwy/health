@@ -827,6 +827,14 @@ def _dashboard_views(
 ) -> list[DashboardView]:
     specifications = [
         (
+            "profile",
+            "个人档案",
+            "个人简介与病历",
+            "个人身体状况与往期病历",
+            "查看基础信息、当前健康状态、生活背景和结构化病历时间线。",
+            site_root / "profile" / "index.html",
+        ),
+        (
             "health",
             "健康计划",
             "健康与补剂",
@@ -927,9 +935,10 @@ def _render_dashboard_page(
     .status {{ display:inline-flex; align-items:center; gap:7px; padding:8px 11px; border:1px solid #cbd9cf; border-radius:999px; background:#edf5ef; color:var(--green); white-space:nowrap }} .status:before {{ content:""; width:8px; height:8px; border-radius:50%; background:#37a36f }}
     .hero {{ padding:clamp(24px,4vw,42px); border-radius:28px; background:linear-gradient(135deg,#fffdf8,#edf4ed); border:1px solid var(--line); box-shadow:0 18px 50px rgba(32,55,43,.07) }} .hero p {{ max-width:760px; color:var(--muted); font-size:17px }}
     .metrics {{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; margin-top:26px }} .metric {{ padding:18px; border:1px solid var(--line); border-radius:17px; background:rgba(255,255,255,.72) }} .metric span {{ color:var(--muted); font-size:12px }} .metric strong {{ display:block; margin-top:4px; font-size:21px }}
-    .layers {{ display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:22px }} .layer {{ padding:21px; border:1px solid var(--line); border-radius:19px; background:var(--panel) }} .layer i {{ display:grid; place-items:center; width:34px; height:34px; border-radius:11px; background:var(--soft); color:var(--green); font-style:normal; font-weight:900 }} .layer h2 {{ margin:13px 0 4px; font-size:18px }} .layer p {{ margin:0; color:var(--muted) }}
+    .layers {{ display:grid; grid-template-columns:repeat(4,1fr); gap:16px; margin-top:22px }} .layer {{ padding:21px; border:1px solid var(--line); border-radius:19px; background:var(--panel) }} .layer i {{ display:grid; place-items:center; width:34px; height:34px; border-radius:11px; background:var(--soft); color:var(--green); font-style:normal; font-weight:900 }} .layer h2 {{ margin:13px 0 4px; font-size:18px }} .layer p {{ margin:0; color:var(--muted) }}
     #viewer[hidden],#overview[hidden] {{ display:none }} .viewer-head {{ display:flex; justify-content:space-between; gap:20px; align-items:flex-end; margin-bottom:15px }} .viewer-head h2 {{ margin:0; font-size:30px }} .viewer-head p {{ margin:5px 0 0; color:var(--muted) }} .open-link {{ padding:9px 13px; border:1px solid var(--line); border-radius:12px; background:var(--panel); text-decoration:none; white-space:nowrap }}
     iframe {{ display:block; width:100%; min-height:calc(100vh - 165px); border:1px solid var(--line); border-radius:22px; background:white; box-shadow:0 14px 40px rgba(28,48,38,.06) }} footer {{ margin-top:18px; color:var(--muted); font-size:12px }}
+    @media(max-width:1100px) {{ .layers {{ grid-template-columns:1fr 1fr }} }}
     @media(max-width:980px) {{ .shell {{ grid-template-columns:1fr }} aside {{ position:relative; height:auto; padding:18px }} .brand,.privacy {{ display:none }} nav {{ display:flex; gap:8px; overflow-x:auto; padding-bottom:4px }} .nav-home,.nav-group {{ flex:0 0 auto; margin:0 }} .nav-group {{ display:flex; gap:6px }} .nav-group>p {{ display:none }} .nav-link,.nav-home {{ white-space:nowrap; background:rgba(255,255,255,.08) }} .nav-link b {{ display:none }} main {{ padding-top:24px }} }}
     @media(max-width:700px) {{ .topbar,.viewer-head {{ align-items:flex-start; flex-direction:column }} .metrics,.layers {{ grid-template-columns:1fr 1fr }} iframe {{ min-height:72vh }} }}
     @media(max-width:470px) {{ .metrics,.layers {{ grid-template-columns:1fr }} h1 {{ font-size:38px }} }}
@@ -960,9 +969,10 @@ def _render_dashboard_page(
         </div>
       </div>
       <div class="layers">
-        <article class="layer"><i>1</i><h2>健康计划</h2><p>个人目标、补剂营养表、保留或停用建议及使用方式。</p></article>
-        <article class="layer"><i>2</i><h2>每日证据</h2><p>原始照片留在 data；内部清单位于 runtime；网页和预览在 site 展示。</p></article>
-        <article class="layer"><i>3</i><h2>长期趋势</h2><p>按有记录日期计算 7/30 天区间，不把缺失日当作零。</p></article>
+        <article class="layer"><i>1</i><h2>个人档案</h2><p>稳定身体背景、当前健康状态、病历摘要与原件索引。</p></article>
+        <article class="layer"><i>2</i><h2>健康计划</h2><p>个人目标、补剂营养表、保留或停用建议及使用方式。</p></article>
+        <article class="layer"><i>3</i><h2>每日证据</h2><p>原始照片留在 data；内部清单位于 runtime；网页和预览在 site 展示。</p></article>
+        <article class="layer"><i>4</i><h2>长期趋势</h2><p>按有记录日期计算 7/30 天区间，不把缺失日当作零。</p></article>
       </div>
       <footer>更新于 {html.escape(generated)} · 个人记录与建议不替代医疗诊断。</footer>
     </section>

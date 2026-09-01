@@ -10,7 +10,9 @@
 
 ## Never tracked
 
-- `config/health_profile.json`;
+- `config/health_profile.json` (private operational settings and active ID);
+- `data/profiles/<profile_id>/profile.json`, every medical index, and every raw
+  medical record;
 - anything below `data/` except `data/README.md`;
 - anything below `runtime/` except `runtime/README.md`;
 - anything below `site/` except `site/README.md`;
@@ -19,7 +21,9 @@
 
 `.gitignore` prevents ordinary staging. `.githooks/pre-commit` also inspects the staged Git snapshot, rejects private paths and binary media, limits file size, and searches for home-directory paths and common credential forms. This second layer catches accidental `git add -f` usage.
 
-`site/index.html` is the local display surface for private health reports. Open
+`site/index.html` is the local display surface for private health reports. Its
+profile page contains structured medical summaries but never raw-record paths or
+links. Open
 it as a local file, or serve only `site/` on `127.0.0.1`. Do not use the
 repository root as an HTTP document root and do not
 publish the portal without a separate, explicit sharing decision.

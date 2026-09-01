@@ -11,11 +11,16 @@ from pathlib import Path
 from typing import Any
 
 from .errors import PipelineError
+from .personal_profile import (
+    active_profile_id,
+    runtime_profile_context,
+    validate_profile_bundle,
+)
 
 
 DEFAULT_ROOT = Path(__file__).resolve().parents[2]
 ROOT = Path(os.environ.get("HEALTHLOG_ROOT", str(DEFAULT_ROOT))).expanduser().resolve()
-PROFILE_PATH = ROOT / "config" / "health_profile.json"
+SETTINGS_PATH = ROOT / "config" / "health_profile.json"
 PIPELINE_DIR_NAME = "pipeline"
 MANIFEST_NAME = "manifest.json"
 ANALYSIS_NAME = "analysis.json"
@@ -45,6 +50,24 @@ class WorkspacePaths:
     daily_index_md: Path
     daily_index_html: Path
     dashboard: Path
+
+
+@dataclass(frozen=True, slots=True)
+class PersonalProfilePaths:
+    """Typed locations owned by one active local personal profile."""
+
+    profile_id: str
+    records_root: Path
+    profile_dir: Path
+    profile_json: Path
+    medical_dir: Path
+    medical_index: Path
+    medical_files_dir: Path
+    migrations_dir: Path
+    runtime_dir: Path
+    runtime_snapshot: Path
+    site_dir: Path
+    site_html: Path
 
 
 def resolve_date(value: str) -> date:
@@ -91,13 +114,15 @@ def write_json(path: Path, value: dict[str, Any]) -> None:
     atomic_write_text(path, payload)
 
 
-def load_profile() -> dict[str, Any]:
-    profile = load_json(PROFILE_PATH)
-    if profile.get("schema_version") != 1:
-        raise PipelineError(f"不支持的健康档案版本：{PROFILE_PATH}")
-    pipeline = profile.get("pipeline")
+def load_settings() -> dict[str, Any]:
+    """Load operational settings without requiring the durable profile yet."""
+
+    settings = load_json(SETTINGS_PATH)
+    if settings.get("schema_version") not in {1, 2}:
+        raise PipelineError(f"不支持的本地设置版本：{SETTINGS_PATH}")
+    pipeline = settings.get("pipeline")
     if not isinstance(pipeline, dict):
-        raise PipelineError(f"健康档案缺少 pipeline 对象：{PROFILE_PATH}")
+        raise PipelineError(f"本地设置缺少 pipeline 对象：{SETTINGS_PATH}")
     legacy_keys = {
         "daily_directory",
         "database_path",
@@ -109,7 +134,37 @@ def load_profile() -> dict[str, Any]:
             f"健康档案仍使用旧目录字段（{joined}）；"
             "请改为 daily_records_directory、runtime_directory 和 site_directory"
         )
-    return profile
+    return settings
+
+
+def load_profile() -> dict[str, Any]:
+    """Load the analysis context, preferring the canonical durable profile."""
+
+    settings = load_settings()
+    try:
+        paths = personal_profile_paths(settings)
+    except PipelineError:
+        if settings.get("schema_version") == 1:
+            return settings
+        raise
+    if not paths.profile_json.is_file():
+        if settings.get("schema_version") == 1:
+            return settings
+        raise PipelineError(
+            f"缺少活动个人档案：{paths.profile_json}；请先运行 diet profile-init"
+        )
+    if not paths.medical_index.is_file():
+        if settings.get("schema_version") == 1:
+            return settings
+        raise PipelineError(
+            f"缺少活动档案的病历索引：{paths.medical_index}；请先运行 diet profile-init"
+        )
+    personal_profile = load_json(paths.profile_json)
+    medical_index = load_json(paths.medical_index)
+    errors, _ = validate_profile_bundle(personal_profile, medical_index)
+    if errors:
+        raise PipelineError("个人档案未通过校验：\n- " + "\n- ".join(errors))
+    return runtime_profile_context(settings, personal_profile)
 
 
 def configured_private_path(profile: dict[str, Any], key: str, default: str) -> Path:
@@ -131,6 +186,12 @@ def runtime_root(profile: dict[str, Any]) -> Path:
 
 def site_root(profile: dict[str, Any]) -> Path:
     return configured_private_path(profile, "site_directory", "site")
+
+
+def profile_records_root(profile: dict[str, Any]) -> Path:
+    return configured_private_path(
+        profile, "profile_records_directory", "data/profiles"
+    )
 
 
 def database_path(profile: dict[str, Any]) -> Path:
@@ -164,6 +225,47 @@ def _ensure_disjoint_roots(configured_roots: dict[str, Path]) -> None:
                 raise PipelineError(f"{left_name} 与 {right_name} 必须是互不包含的目录")
 
 
+def personal_profile_paths(profile: dict[str, Any]) -> PersonalProfilePaths:
+    """Resolve one active owner's durable, runtime, and presentation paths."""
+
+    try:
+        profile_id = active_profile_id(profile)
+    except ValueError as exc:
+        raise PipelineError(str(exc)) from exc
+    records_root = profile_records_root(profile)
+    local_runtime_root = runtime_root(profile)
+    local_site_root = site_root(profile)
+    daily_records_root = configured_private_path(
+        profile, "daily_records_directory", "data/daily"
+    )
+    _ensure_disjoint_roots(
+        {
+            "pipeline.profile_records_directory": records_root,
+            "pipeline.daily_records_directory": daily_records_root,
+            "pipeline.runtime_directory": local_runtime_root,
+            "pipeline.site_directory": local_site_root,
+        }
+    )
+    profile_dir = records_root / profile_id
+    medical_dir = profile_dir / "medical"
+    runtime_dir = local_runtime_root / "profile"
+    site_dir = local_site_root / "profile"
+    return PersonalProfilePaths(
+        profile_id=profile_id,
+        records_root=records_root,
+        profile_dir=profile_dir,
+        profile_json=profile_dir / "profile.json",
+        medical_dir=medical_dir,
+        medical_index=medical_dir / "index.json",
+        medical_files_dir=medical_dir / "files",
+        migrations_dir=profile_dir / "migrations",
+        runtime_dir=runtime_dir,
+        runtime_snapshot=runtime_dir / "profile.snapshot.json",
+        site_dir=site_dir,
+        site_html=site_dir / REPORT_HTML_NAME,
+    )
+
+
 def paths_for(target: date, profile: dict[str, Any]) -> WorkspacePaths:
     records_root = configured_private_path(
         profile, "daily_records_directory", "data/daily"
@@ -173,6 +275,7 @@ def paths_for(target: date, profile: dict[str, Any]) -> WorkspacePaths:
     _ensure_disjoint_roots(
         {
             "pipeline.daily_records_directory": records_root,
+            "pipeline.profile_records_directory": profile_records_root(profile),
             "pipeline.runtime_directory": local_runtime_root,
             "pipeline.site_directory": local_site_root,
         }

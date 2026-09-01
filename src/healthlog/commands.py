@@ -46,26 +46,40 @@ from .presentation import (
     update_daily_indexes,
     update_dashboard,
 )
+from .profile_workflow import (
+    refresh_personal_profile_if_available,
+    validate_personal_profile_sources,
+)
 from .store import NutritionStore
 from .summary import json_text as summary_json_text
 from .summary import make_summary, render_html as render_summary_html
 from .summary import render_markdown as render_summary_markdown
 from .tracking import tracking_targets
 from .workspace import (
-    PROFILE_PATH,
     ROOT,
+    SETTINGS_PATH,
     WorkspacePaths,
     atomic_write_text,
     database_path,
     load_json,
     load_profile,
+    load_settings,
     nutrition_reports_dir,
     nutrition_site_dir,
     paths_for,
+    personal_profile_paths,
     relative_private_path,
     resolve_date,
     write_json,
 )
+
+
+def _analysis_profile_reference(settings: dict[str, Any]) -> str:
+    try:
+        path = personal_profile_paths(settings).profile_json
+    except PipelineError:
+        path = SETTINGS_PATH
+    return relative_private_path(path)
 
 
 def prepare(args: argparse.Namespace) -> int:
@@ -96,7 +110,11 @@ def prepare(args: argparse.Namespace) -> int:
 
     manifest = build_manifest(target, paths, shortcut_result)
     write_json(paths.manifest, manifest)
-    template = analysis_template(target, manifest)
+    template = analysis_template(
+        target,
+        manifest,
+        profile_reference=_analysis_profile_reference(profile),
+    )
     write_json(paths.template, template)
 
     if args.reset_analysis or not paths.analysis.exists():
@@ -181,12 +199,11 @@ def render(args: argparse.Namespace) -> int:
         paths,
         profile,
     )
-    page = render_html(
-        target, analysis, manifest, totals, comparisons, paths, profile
-    )
+    page = render_html(target, analysis, manifest, totals, comparisons, paths, profile)
     atomic_write_text(paths.report_md, markdown)
     atomic_write_text(paths.report_html, page)
     update_daily_indexes(profile)
+    profile_warnings = refresh_personal_profile_if_available(profile)
     dashboard_path = update_dashboard(profile)
     db_path = sync_analysis_to_store(
         profile=profile,
@@ -207,6 +224,8 @@ def render(args: argparse.Namespace) -> int:
     print(f"TOTAL_PROTEIN={display_range(totals['protein_g'], 'g')}")
     for warning in warnings:
         print(f"WARNING={warning}")
+    for warning in profile_warnings:
+        print(f"WARNING=个人档案：{warning}")
     return 0
 
 
@@ -463,7 +482,14 @@ def rebuild_database(args: argparse.Namespace) -> int:
                 },
             )
             write_json(paths.manifest, manifest)
-            write_json(paths.template, analysis_template(target, manifest))
+            write_json(
+                paths.template,
+                analysis_template(
+                    target,
+                    manifest,
+                    profile_reference=_analysis_profile_reference(profile),
+                ),
+            )
             errors, _ = validate_analysis(analysis, manifest)
             if errors:
                 skipped.append(
@@ -536,6 +562,7 @@ def nutrition_summary(args: argparse.Namespace) -> int:
     atomic_write_text(json_path, summary_json_text(result))
     atomic_write_text(md_path, render_summary_markdown(result))
     atomic_write_text(html_path, render_summary_html(result))
+    profile_warnings = refresh_personal_profile_if_available(profile)
     dashboard_path = update_dashboard(profile)
     html_errors, html_warnings, _ = audit_static_html(html_path)
     if html_errors:
@@ -569,18 +596,21 @@ def nutrition_summary(args: argparse.Namespace) -> int:
         print(f"DASHBOARD={dashboard_path}")
         for warning in html_warnings:
             print(f"WARNING={warning}")
+        for warning in profile_warnings:
+            print(f"WARNING=个人档案：{warning}")
     return 0
 
 
 def dashboard_command(_: argparse.Namespace) -> int:
     profile = load_profile()
+    profile_warnings = refresh_personal_profile_if_available(profile)
     dashboard_path = update_dashboard(profile)
     errors, warnings, _ = audit_static_html(dashboard_path)
     if errors:
         raise PipelineError("健康门户未通过校验：\n- " + "\n- ".join(errors))
     print(f"DASHBOARD={dashboard_path}")
     print("DASHBOARD_STATUS=ready")
-    for warning in warnings:
+    for warning in sorted(set(warnings + profile_warnings)):
         print(f"WARNING={warning}")
     return 0
 
@@ -779,8 +809,8 @@ def fdc_food_command(args: argparse.Namespace) -> int:
 def doctor(_: argparse.Namespace) -> int:
     failures = 0
     print(f"ROOT={ROOT}")
-    print(f"PROFILE={'ok' if PROFILE_PATH.exists() else 'missing'}:{PROFILE_PATH}")
-    if not PROFILE_PATH.exists():
+    print(f"SETTINGS={'ok' if SETTINGS_PATH.exists() else 'missing'}:{SETTINGS_PATH}")
+    if not SETTINGS_PATH.exists():
         failures += 1
     print(
         f"PYTHON={sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
@@ -804,7 +834,27 @@ def doctor(_: argparse.Namespace) -> int:
     if not magick and not sips:
         failures += 1
     try:
+        settings = load_settings()
+        personal_paths = personal_profile_paths(settings)
+        print(f"ACTIVE_PROFILE_ID={personal_paths.profile_id}")
+        print(
+            "PERSONAL_PROFILE="
+            f"{'ok' if personal_paths.profile_json.is_file() else 'missing'}:"
+            f"{personal_paths.profile_json}"
+        )
+        print(
+            "MEDICAL_INDEX="
+            f"{'ok' if personal_paths.medical_index.is_file() else 'missing'}:"
+            f"{personal_paths.medical_index}"
+        )
+        if not personal_paths.profile_json.is_file():
+            failures += 1
+        if not personal_paths.medical_index.is_file():
+            failures += 1
         profile = load_profile()
+        _, profile_warnings = validate_personal_profile_sources(profile)
+        for warning in profile_warnings:
+            print(f"WARNING=个人档案：{warning}")
         shortcut_name = profile["pipeline"]["shortcut_name"]
         paths = paths_for(date.today(), profile)
         print(f"SHORTCUT_NAME={shortcut_name}")

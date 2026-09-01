@@ -35,14 +35,19 @@ NUTRITION_SOURCE_TYPES = {
     "manual",
     "unknown",
 }
-PROFILE_REFERENCE = "config/health_profile.json"
+PROFILE_REFERENCE = "data/profiles/<active_profile_id>/profile.json"
 
 
-def analysis_template(target: date, manifest: dict[str, Any]) -> dict[str, Any]:
+def analysis_template(
+    target: date,
+    manifest: dict[str, Any],
+    *,
+    profile_reference: str = PROFILE_REFERENCE,
+) -> dict[str, Any]:
     return {
         "schema_version": 3,
         "date": target.isoformat(),
-        "profile": PROFILE_REFERENCE,
+        "profile": profile_reference,
         "day_context": {
             "day_type": "unknown",
             "training_notes": "",

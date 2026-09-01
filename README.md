@@ -6,8 +6,8 @@ Local HealthLog is a local-first nutrition logging pipeline for macOS. An Apple
 Shortcut exports photos for a requested date, Codex reviews every image and
 creates a source-aware `analysis.json` with uncertainty intervals, and the
 application renders static Markdown and HTML, updates a local SQLite index, and
-combines supplement guidance, daily records, and 7/30-day summaries in one
-private health portal.
+combines a validated personal/medical profile, supplement guidance, daily
+records, and 7/30-day summaries in one private health portal.
 
 ```mermaid
 flowchart LR
@@ -19,6 +19,7 @@ flowchart LR
     P --> E
     E --> S[Food relevance screening]
     S --> N[Meal reconstruction and nutrition]
+    X[Private profile and medical index] --> N
     U[Optional USDA text lookup] --> N
     N --> F[analysis.json v3]
     F --> G[runtime: Markdown / JSON]
@@ -53,7 +54,8 @@ cd local-healthlog
 
 The setup script:
 
-- creates the ignored `config/health_profile.json` from a safe template;
+- creates the ignored operational `config/health_profile.json` from a safe
+  template and initializes the active owner's durable personal profile;
 - creates `data/` for durable records, `runtime/` for derived state, and `site/`
   for private browser output;
 - optionally installs user-level links for the `diet` command and Codex Skill;
@@ -62,12 +64,32 @@ The setup script:
 - initializes the private SQLite database and runs environment diagnostics.
 
 Apple requires the first Shortcut import to be performed manually and asks for
-Photos access. After importing it, edit the targets in the local health profile.
+Photos access. After importing it, edit the `PROFILE_JSON` printed by setup and
+run `diet profile` to validate and rebuild its private page.
 For code-only or CI-style validation, run:
 
 ```bash
 ./scripts/setup.sh --no-install --skip-shortcut
 ```
+
+## Personal profile and medical history
+
+The workspace has one active local owner. Operational settings select its
+stable `profile_id`; personal facts live in
+`data/profiles/<profile_id>/profile.json`. Past records are indexed in
+`medical/index.json`, and untouched PDFs or images live in `medical/files/`.
+
+```bash
+diet profile-init             # create missing private documents
+diet profile                  # validate and rebuild profile HTML + dashboard
+```
+
+For an older schema-v1 workspace, `diet profile-init --migrate-config` preserves
+a private legacy backup before removing personal facts from operational
+settings. The generated `site/profile/index.html` shows structured body status,
+conditions, symptoms, medicines, allergies, activity, targets, and a medical
+timeline. It displays the count of raw records but never includes their names,
+paths, or links. See the [personal profile boundary](docs/personal-profile.md).
 
 ## Daily analysis
 
@@ -94,9 +116,10 @@ HTML and browser assets to `site/`, and synchronizes the portal and SQLite.
 directory boundaries, reports, the portal, and the database hash.
 
 The local entry point is `site/index.html`. Its navigation follows “overview →
-health plan / daily diet / trends → detailed report” and switches among the
-supplement report, latest day, all dates, and 7/30-day summaries without leaving
-the portal. Every browser page and display-only image stays under `site/`. Pages
+personal profile / health plan / daily diet / trends → detailed report” and
+switches among the profile, supplement report, latest day, all dates, and
+7/30-day summaries without leaving the portal. Every browser page and
+display-only image stays under `site/`. Pages
 load no external scripts, fonts, or images, and each report can also be opened
 on its own.
 
@@ -119,7 +142,7 @@ from food items. Heme-iron and oily-fish frequency is counted from reviewed meal
 tags. Unreported values remain `null`, and a partial photo log produces only a
 confirmed minimum event count.
 
-The public profile uses reference defaults such as 1,000 mg calcium for adults
+The example personal profile uses reference defaults such as 1,000 mg calcium for adults
 age 19–50, 1,700 mL base direct drinking water for an adult man, and 20–40 g
 protein per meal; local profiles can override them. Ordinary mixed meals are
 not labeled an iron/calcium conflict. The timing field primarily checks a
@@ -187,31 +210,39 @@ not the only copy of the records.
 ├── bin/diet                     # Clone-local CLI
 ├── config/
 │   ├── health_profile.example.json
-│   └── health_profile.json      # Private and ignored
+│   ├── personal_profile.example.json
+│   └── health_profile.json      # Private operational settings; ignored
 ├── data/                        # Durable private records; ignored
 │   ├── daily/YYYYMMDD/          # Original media + canonical analysis.json
-│   ├── medical/
+│   ├── profiles/<id>/
+│   │   ├── profile.json         # Canonical personal and health context
+│   │   └── medical/             # index.json + untouched files/
 │   └── supplements/
 ├── runtime/                     # Rebuildable private output; ignored
 │   ├── daily/YYYYMMDD/          # Manifest, template, daily Markdown
+│   ├── profile/                 # Validated agent-facing profile snapshot
 │   ├── reports/nutrition/       # 7/30-day JSON and Markdown
 │   └── state/healthlog.sqlite3  # SQLite index and USDA cache
 ├── site/                        # Private browser presentation; ignored
 │   ├── index.html               # Unified static health portal
+│   ├── profile/                 # Personal status and medical timeline HTML
 │   ├── health/                  # Health/supplement HTML and web assets
 │   ├── daily/YYYYMMDD/          # Daily HTML and JPEG previews
 │   └── nutrition/               # 7/30-day HTML
 ├── src/healthlog/               # Layered application code
 │   ├── cli.py                   # Argument parsing and exit codes
 │   ├── commands.py              # Use-case orchestration
+│   ├── profile_workflow.py      # Profile migration/render orchestration
 │   ├── analysis.py              # Analysis schema, validation, targets
 │   ├── nutrition.py             # Nutrition vocabulary and interval aggregation
 │   ├── tracking.py              # Water, calcium, recovery, body, and meal metrics
 │   ├── tracking_summary.py      # Longitudinal tracking aggregation and coverage
 │   ├── summary.py               # Longitudinal summary domain logic
+│   ├── personal_profile.py      # Personal/medical schemas and validation
 │   ├── workspace.py             # Config, path boundaries, atomic file I/O
 │   ├── media.py                 # Shortcut, media manifest, previews
 │   ├── presentation.py          # Markdown, HTML, local portal
+│   ├── profile_presentation.py  # Private profile HTML adapter
 │   ├── store.py                 # Rebuildable SQLite adapter
 │   └── fdc.py                   # USDA FoodData Central adapter
 ├── tests/                       # Standard-library tests without personal data
@@ -244,7 +275,7 @@ licenses.
 
 Application dependencies flow in one direction: `cli → commands →
 domain/adapters`. The `analysis`, `nutrition`, `tracking`, `tracking_summary`,
-and `summary` domain modules do
+`personal_profile`, and `summary` domain modules do
 not import filesystem, media, presentation, SQLite, or network adapters. See
 the [architecture document](docs/architecture.md) for module ownership and the
 dependency graph.

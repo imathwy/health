@@ -17,8 +17,10 @@ flowchart LR
     C --> P[Web previews in site]
     D --> E[Codex reviews every image]
     P --> E
-    U[Optional USDA text lookup] --> E
-    E --> F[analysis.json v3]
+    E --> S[Food relevance screening]
+    S --> N[Meal reconstruction and nutrition]
+    U[Optional USDA text lookup] --> N
+    N --> F[analysis.json v3]
     F --> G[runtime: Markdown / JSON]
     F --> W[site: HTML and web assets]
     F --> H[Local SQLite]
@@ -29,6 +31,13 @@ The core constraints are simple: original media is never modified, private data
 never enters Git, photo evidence and nutrition-composition sources remain
 separate, and every estimate preserves lower and upper bounds instead of
 presenting a midpoint as a measurement.
+
+Every exported asset is inspected before nutrition analysis. `consumed_food`
+and `possible_food` form the food-related screening set, while only
+`consumed_food` may link to a meal or contribute nutrients. Package-only food or
+drink photos count as consumed when the local profile enables that rule;
+`possible_food` waits for confirmation, and `unrelated` remains in a collapsed
+audit section instead of cluttering the diet gallery.
 
 ## Clone and bootstrap
 
@@ -70,7 +79,7 @@ The equivalent terminal workflow is:
 
 ```bash
 diet prepare yesterday
-# Codex reviews every preview and completes analysis.json
+# Codex reviews every preview, screens food relevance, and completes analysis.json
 diet render yesterday
 diet verify yesterday
 diet status yesterday

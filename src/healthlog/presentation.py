@@ -13,7 +13,12 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
-from .analysis import display_range, sum_nutrition
+from .analysis import (
+    FOOD_RELATED_CLASSIFICATIONS,
+    display_range,
+    image_classification_counts,
+    sum_nutrition,
+)
 from .errors import PipelineError
 from .media import manifest_preview_path
 from .tracking import (
@@ -169,6 +174,23 @@ def tracking_source_label(value: Any) -> str:
     }.get(str(value), str(value))
 
 
+def image_classification_label(value: Any) -> str:
+    return {
+        "consumed_food": "确认摄入相关",
+        "possible_food": "可能与摄入相关",
+        "unrelated": "无关照片",
+        "unreviewed": "尚未检查",
+    }.get(str(value), str(value))
+
+
+def image_classification_class(value: Any) -> str:
+    if value == "consumed_food":
+        return "ok"
+    if value == "possible_food":
+        return "warn"
+    return "neutral"
+
+
 def tracking_estimate(row: dict[str, Any]) -> str:
     value = row.get("range")
     if not isinstance(value, list) or len(value) != 2:
@@ -207,6 +229,18 @@ def render_markdown(
     protein_by_meal = {row["meal_id"]: row for row in protein_rows}
     tag_counts = meal_tag_counts(analysis)
     timing = iron_calcium_row(analysis)
+    screening_counts = image_classification_counts(analysis)
+    food_assets = [
+        asset
+        for asset in manifest["assets"]
+        if image_by_file[asset["file"]]["classification"]
+        in FOOD_RELATED_CLASSIFICATIONS
+    ]
+    unrelated_assets = [
+        asset
+        for asset in manifest["assets"]
+        if image_by_file[asset["file"]]["classification"] == "unrelated"
+    ]
 
     lines = [
         f"# {target.isoformat()} 饮食分析",
@@ -220,6 +254,12 @@ def render_markdown(
         f"| 日型 | {md_escape(day_context.get('day_type', 'unknown'))} |",
         f"| 训练 | {md_escape(day_context.get('training_notes') or '未记录')} |",
         f"| 照片覆盖 | {md_escape(day_context.get('photo_coverage') or 'unknown')} |",
+        (
+            f"| 照片筛选 | 共检查 {screening_counts['reviewed']} 张；"
+            f"食物相关 {screening_counts['food_related']} 张，"
+            f"其中待确认 {screening_counts['possible_food']} 张；"
+            f"无关 {screening_counts['unrelated']} 张 |"
+        ),
         f"| 总体置信度 | {md_escape(analysis.get('overall_confidence'))} |",
         "",
         "## 营养估算与目标",
@@ -330,13 +370,15 @@ def render_markdown(
 
     lines.extend(
         [
-            "## 图片核对",
+            "## 食物相关图片核对",
+            "",
+            "> 只有 `consumed_food` 会进入餐次和营养估算；`possible_food` 只保留待确认线索。",
             "",
             "| 原文件 | 预览 | 分类 | 餐次 | 可见事实 | 不确定性 |",
             "|---|---|---|---|---|---|",
         ]
     )
-    for asset in manifest["assets"]:
+    for asset in food_assets:
         filename = asset["file"]
         row = image_by_file[filename]
         preview = preview_by_file.get(filename)
@@ -347,7 +389,7 @@ def render_markdown(
                 [
                     f"`{md_escape(filename)}`",
                     preview_link,
-                    md_escape(row["classification"]),
+                    md_escape(image_classification_label(row["classification"])),
                     md_escape(row.get("meal_id") or "—"),
                     md_escape("；".join(row.get("observations", [])) or "—"),
                     md_escape("；".join(row.get("uncertainties", [])) or "—"),
@@ -355,6 +397,38 @@ def render_markdown(
             )
             + " |"
         )
+    if not food_assets:
+        lines.append("| — | — | — | — | 当天未发现食物相关照片 | — |")
+
+    lines.extend(
+        [
+            "",
+            "## 无关图片审计",
+            "",
+            "> 这些照片已经逐张检查，但不参与餐次重建或营养估算。",
+            "",
+            "| 原文件 | 预览 | 可见事实 |",
+            "|---|---|---|",
+        ]
+    )
+    for asset in unrelated_assets:
+        filename = asset["file"]
+        row = image_by_file[filename]
+        preview = preview_by_file.get(filename)
+        preview_link = f"[查看]({preview})" if preview else "无预览"
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    f"`{md_escape(filename)}`",
+                    preview_link,
+                    md_escape("；".join(row.get("observations", [])) or "—"),
+                ]
+            )
+            + " |"
+        )
+    if not unrelated_assets:
+        lines.append("| — | — | 未发现无关照片 |")
 
     lines.extend(
         [
@@ -434,6 +508,7 @@ def render_html(
     protein_by_meal = {row["meal_id"]: row for row in protein_rows}
     tag_counts = meal_tag_counts(analysis)
     timing = iron_calcium_row(analysis)
+    screening_counts = image_classification_counts(analysis)
     comparison_html = "".join(
         "<tr>"
         f"<td>{html.escape(row['label'])}</td>"
@@ -502,7 +577,8 @@ def render_html(
             "</section>"
         )
 
-    gallery_cards: list[str] = []
+    food_gallery_cards: list[str] = []
+    unrelated_gallery_cards: list[str] = []
     for asset in manifest["assets"]:
         record = image_rows[asset["file"]]
         preview = preview_href(asset, manifest, paths, paths.report_html.parent)
@@ -512,11 +588,26 @@ def render_html(
             media = '<div class="no-preview">无预览</div>'
         observations = "；".join(record.get("observations", [])) or "未记录可见事实"
         uncertainties = "；".join(record.get("uncertainties", [])) or "未记录"
-        gallery_cards.append(
+        classification = record["classification"]
+        card = (
             '<article class="photo-card">'
             f'{media}<div class="photo-body"><div class="photo-meta"><code>{html.escape(asset["file"])}</code>'
-            f'<span class="pill neutral">{html.escape(record["classification"])}</span></div>'
+            f'<span class="pill {image_classification_class(classification)}">{html.escape(image_classification_label(classification))}</span></div>'
             f'<p>{html.escape(observations)}</p><p class="muted">不确定性：{html.escape(uncertainties)}</p></div></article>'
+        )
+        if classification in FOOD_RELATED_CLASSIFICATIONS:
+            food_gallery_cards.append(card)
+        elif classification == "unrelated":
+            unrelated_gallery_cards.append(card)
+
+    food_gallery = "".join(food_gallery_cards) or "<p>当天未发现食物相关照片。</p>"
+    unrelated_audit = ""
+    if unrelated_gallery_cards:
+        unrelated_audit = (
+            '<details class="panel audit">'
+            f'<summary>无关照片审计 · {len(unrelated_gallery_cards)} 张（已检查，不参与营养估算）</summary>'
+            '<p class="muted">保留这些分类是为了证明当天全部导出照片均已检查；默认折叠，避免干扰饮食复盘。</p>'
+            f'<div class="gallery">{"".join(unrelated_gallery_cards)}</div></details>'
         )
 
     day_context = analysis["day_context"]
@@ -548,6 +639,7 @@ def render_html(
     .gallery {{ display:grid; grid-template-columns:repeat(3,1fr); gap:14px; }}
     .photo-card {{ overflow:hidden; background:var(--panel); border:1px solid var(--line); border-radius:18px; }} .photo-card img,.no-preview {{ display:block; width:100%; aspect-ratio:4/3; object-fit:cover; background:#e7e8e3; }} .no-preview {{ display:grid; place-items:center; color:var(--muted); }} .photo-body {{ padding:14px; }} .photo-body p {{ margin:8px 0 0; }} .photo-meta {{ display:flex; align-items:center; justify-content:space-between; gap:8px; }} code {{ font-size:12px; overflow-wrap:anywhere; }}
     .notice {{ margin:18px 0; padding:14px 18px; border-left:4px solid var(--amber); background:var(--amber-soft); border-radius:8px 16px 16px 8px; }}
+    details.audit > summary {{ cursor:pointer; font-weight:750; font-size:18px; }} details.audit[open] > summary {{ margin-bottom:14px; }}
     footer {{ color:var(--muted); text-align:center; padding-top:20px; font-size:13px; }}
     @media (max-width:850px) {{ .metrics,.gallery {{ grid-template-columns:repeat(2,1fr); }} .grid-2 {{ grid-template-columns:1fr; }} }}
     @media (max-width:560px) {{ main {{ width:min(100% - 20px,1120px); padding-top:10px; }} .hero {{ padding:26px 20px; border-radius:20px; }} .metrics,.gallery {{ grid-template-columns:1fr; }} .panel {{ padding:18px; }} }}
@@ -558,7 +650,7 @@ def render_html(
   <header class="hero">
     <p class="eyebrow">Daily Diet Review · {html.escape(day_context.get("day_type", "unknown"))}</p>
     <h1>{target.isoformat()}</h1>
-    <p>根据当天照片进行区间估算。照片不一定覆盖全部摄入，拍到的食物也不自动视为全部吃完。</p>
+    <p>先检查当天全部照片并筛出食物相关内容，再进行区间估算。照片不一定覆盖全部摄入，拍到的食物也不自动视为全部吃完。</p>
   </header>
   <section class="metrics">
     <div class="metric"><span>热量</span><b>{html.escape(display_range(totals["kcal"], "kcal"))}</b></div>
@@ -566,7 +658,7 @@ def render_html(
     <div class="metric"><span>碳水</span><b>{html.escape(display_range(totals["carbohydrate_g"], "g"))}</b></div>
     <div class="metric"><span>脂肪</span><b>{html.escape(display_range(totals["fat_g"], "g"))}</b></div>
   </section>
-  <div class="notice">照片覆盖：{html.escape(str(day_context.get("photo_coverage", "unknown")))}；总体置信度：{html.escape(str(analysis.get("overall_confidence")))}。请优先看区间和方向，不要把中点当成精确值。</div>
+  <div class="notice">已检查 {screening_counts['reviewed']} 张照片：食物相关 {screening_counts['food_related']} 张（其中待确认 {screening_counts['possible_food']} 张），无关 {screening_counts['unrelated']} 张。照片覆盖：{html.escape(str(day_context.get("photo_coverage", "unknown")))}；总体置信度：{html.escape(str(analysis.get("overall_confidence")))}。只有确认摄入相关的照片进入营养估算。</div>
   <section class="panel">
     <div class="section-head"><div><p class="eyebrow">Targets</p><h2>营养估算与个人目标</h2></div></div>
     <div class="table-wrap"><table><thead><tr><th>营养素</th><th>照片估算</th><th>个人目标</th><th>判断</th></tr></thead><tbody>{comparison_html}</tbody></table></div>
@@ -585,7 +677,8 @@ def render_html(
     <div class="panel"><p class="eyebrow">Assessment</p><h2>主要发现</h2>{html_list(assessment.get("summary"))}<h3>做得好的地方</h3>{html_list(assessment.get("strengths"))}<h3>主要缺口</h3>{html_list(assessment.get("gaps"))}</div>
     <div class="panel"><p class="eyebrow">Next actions</p><h2>下一次怎么吃</h2>{html_list(assessment.get("next_actions"))}<h3>补剂说明</h3><p>{html.escape(assessment.get("supplement_note") or "不根据单日照片新增补剂。")}</p></div>
   </section>
-  <section class="panel"><p class="eyebrow">Evidence</p><h2>图片核对</h2><div class="gallery">{"".join(gallery_cards)}</div></section>
+  <section class="panel"><p class="eyebrow">Food photo screening</p><h2>食物相关图片</h2><p class="muted">包装、饮料、营养标签、餐前餐后和重复角度都先判定相关性；可能相关但尚未确认摄入的照片不会进入营养合计。</p><div class="gallery">{food_gallery}</div></section>
+  {unrelated_audit}
   <section class="panel"><p class="eyebrow">Limits</p><h2>假设与限制</h2>{html_list(analysis.get("assumptions"))}</section>
   <footer>生成于 {datetime.now().astimezone().isoformat(timespec="seconds")} · 本报告用于个人饮食记录，不替代医疗诊断或营养处方。</footer>
 </main>

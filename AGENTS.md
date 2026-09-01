@@ -46,14 +46,15 @@ When the user asks to analyze food for today, yesterday, or a date:
 3. Read `config/health_profile.json`, the canonical analysis under
    `data/daily/YYYYMMDD/`, and the generated manifest/template under
    `runtime/daily/YYYYMMDD/pipeline/`.
-4. Inspect every manifest preview under `site/daily/YYYYMMDD/assets/`. Classify every asset as `consumed_food`, `possible_food`, or `unrelated`.
-5. Apply `diet_context.food_photo_means_consumed` from the local profile. When true, a food or drink photo confirms some consumption, but it does not establish the amount or that the whole portion was eaten.
-6. Reconstruct meals from timestamps and visual context. Pair before/after photos and count repeated angles or Live Photo pairs once.
-7. Write schema-v3 `analysis.json` with range estimates for calories, protein, carbohydrate, fat, fiber, and sodium. Every item also records `evidence.portion_method` and `evidence.nutrition_source`; every meal has `tracking_tags`; non-photo observations live in the top-level `tracking` block. Optional and tracking values remain null/absent when unknown rather than being filled with zero.
-8. Prefer a visible package label, then a verified matching single-food database record, then a wide recipe estimate. Do not map a mixed cafeteria plate to one USDA item or invent a source after estimating from general knowledge.
-9. Run `./bin/diet render YYYY-MM-DD` and `./bin/diet verify YYYY-MM-DD`. Rendering also syncs the private SQLite index. Fix errors until verification passes.
-10. Run `./bin/diet dashboard` when the unified portal is missing or stale.
-11. Return links to `site/index.html`, the dated runtime Markdown and site HTML,
+4. Inspect every manifest preview under `site/daily/YYYYMMDD/assets/`; never sample. Classify every asset as `consumed_food`, `possible_food`, or `unrelated` before estimating nutrition.
+5. Treat `consumed_food` and `possible_food` as the food-related screening set, but link only `consumed_food` to a meal. `possible_food` and `unrelated` must keep an empty `meal_id` and never contribute to nutrient totals.
+6. Apply `diet_context.food_photo_means_consumed` from the local profile. When true, a food, drink, package, or nutrition-label photo confirms some consumption, but it does not establish the amount or that the whole portion was eaten.
+7. Reconstruct meals from confirmed consumed-food photos, timestamps, and visual context. Pair before/after photos and count repeated angles or Live Photo pairs once.
+8. Write schema-v3 `analysis.json` with range estimates for calories, protein, carbohydrate, fat, fiber, and sodium. Every item also records `evidence.portion_method` and `evidence.nutrition_source`; every meal has `tracking_tags`; non-photo observations live in the top-level `tracking` block. Optional and tracking values remain null/absent when unknown rather than being filled with zero.
+9. Prefer a visible package label, then a verified matching single-food database record, then a wide recipe estimate. Do not map a mixed cafeteria plate to one USDA item or invent a source after estimating from general knowledge.
+10. Run `./bin/diet render YYYY-MM-DD` and `./bin/diet verify YYYY-MM-DD`. Rendering also syncs the private SQLite index. Fix errors until verification passes.
+11. Run `./bin/diet dashboard` when the unified portal is missing or stale.
+12. Return links to `site/index.html`, the dated runtime Markdown and site HTML,
     plus the material uncertainty.
 
 Use the targets and health guardrails from the ignored local profile. Do not infer diagnoses or add supplements from one day of photos. Never delete or alter original media. Do not use `--reset-analysis` on meaningful work unless it has first been preserved. Use `--skip-export` only when the user explicitly wants existing files analyzed or when testing downstream code.

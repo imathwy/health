@@ -74,8 +74,10 @@ flowchart LR
     C --> P[site/daily: browser previews]
     D --> E[Codex review]
     P --> E
-    U[Optional USDA text or ID query] --> E
-    E --> F[data/daily: analysis.json v3]
+    E --> S[Food relevance screening]
+    S --> N[Meal reconstruction and nutrition]
+    U[Optional USDA text or ID query] --> N
+    N --> F[data/daily: analysis.json v3]
     F --> G[runtime/daily: Markdown]
     F --> W[site/daily: HTML]
     F --> H[runtime/state: SQLite index]

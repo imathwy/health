@@ -4,6 +4,31 @@ Keep `analysis.json` human-reviewable. The CLI is the final validator. Schema v3
 retains the v2 item provenance below and adds explicit daily observations, body
 measurements, and meal tags.
 
+Every manifest asset must have one top-level image record before meals are
+reconstructed:
+
+```json
+{
+  "file": "IMG_0001.HEIC",
+  "classification": "consumed_food",
+  "meal_id": "lunch",
+  "observations": ["A plated meal and drink are visible"],
+  "uncertainties": ["Consumed fraction is not measured"]
+}
+```
+
+- `consumed_food`: confirmed to represent some intake; it must link to exactly
+  one meal and may support nutrient estimation;
+- `possible_food`: food-related, but it may not represent the user's intake;
+  keep `meal_id` empty and exclude it from nutrient totals until confirmed;
+- `unrelated`: non-food media; keep `meal_id` empty and exclude it from meals;
+- `unreviewed`: template-only state and invalid in a final report.
+
+When the local profile sets `food_photo_means_consumed` to true, a food, drink,
+package, or nutrition-label photo is `consumed_food` even without a plated-food
+view. The photo establishes some consumption, not the quantity or that the full
+package was consumed.
+
 ```json
 {
   "name": "Fish, salmon, cooked, dry heat",

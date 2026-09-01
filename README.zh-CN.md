@@ -12,8 +12,10 @@ flowchart LR
     C --> P[site 中的网页预览]
     D --> E[Codex 逐图检查]
     P --> E
-    U[可选 USDA 文本查询] --> E
-    E --> F[analysis.json v3]
+    E --> S[筛选食物相关照片]
+    S --> N[重建餐次与营养估算]
+    U[可选 USDA 文本查询] --> N
+    N --> F[analysis.json v3]
     F --> G[runtime: Markdown / JSON]
     F --> W[site: HTML 与网页资产]
     F --> H[本地 SQLite]
@@ -21,6 +23,8 @@ flowchart LR
 ```
 
 核心约束：原图不修改，私密数据不进 Git；照片只证明“可能吃了什么和多少”，营养组成来源单独记录；所有估算保留下界和上界，不把区间中点伪装成实测值。
+
+营养分析前会逐张检查当天导出的全部照片。`consumed_food` 与 `possible_food` 组成食物相关筛选集，但只有 `consumed_food` 可以关联餐次并进入营养合计。本地档案开启“食物照片表示有摄入”后，只有包装的食物或饮料照片也算确认摄入；`possible_food` 等待确认，`unrelated` 仅保留在默认折叠的审计区，不干扰饮食照片展示。
 
 ## Clone 与初始化
 
@@ -56,7 +60,7 @@ Apple 要求首次手工导入 Shortcut，并允许它读取 Photos。完成后�
 
 ```bash
 diet prepare yesterday
-# Codex 检查全部预览并填写 analysis.json
+# Codex 检查全部预览、筛选食物相关照片并填写 analysis.json
 diet render yesterday
 diet verify yesterday
 diet status yesterday

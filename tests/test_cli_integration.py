@@ -115,6 +115,10 @@ class CliIntegrationTests(unittest.TestCase):
                 (root / "site" / "daily" / "20260102" / "index.html").read_text(),
             )
             self.assertIn(
+                "食物相关图片",
+                (root / "site" / "daily" / "20260102" / "index.html").read_text(),
+            )
+            self.assertIn(
                 "体重与围度变化",
                 (root / "site" / "nutrition" / "20260102-7d.html").read_text(),
             )

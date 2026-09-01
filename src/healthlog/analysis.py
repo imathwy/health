@@ -14,6 +14,7 @@ from .tracking import (
 
 
 CLASSIFICATIONS = {"consumed_food", "possible_food", "unrelated", "unreviewed"}
+FOOD_RELATED_CLASSIFICATIONS = frozenset({"consumed_food", "possible_food"})
 DAY_TYPES = {"unknown", "rest", "strength", "swim", "tennis", "mixed"}
 CONFIDENCE_LEVELS = {"low", "medium", "high"}
 NUTRIENT_KEYS = CORE_NUTRIENTS
@@ -214,9 +215,34 @@ class AnalysisValidator:
         if not isinstance(meal_images, list):
             self.errors.append(f"餐次 {meal_id}.images 必须是数组")
             return
-        for filename in meal_images:
+        valid_names = [
+            filename
+            for filename in meal_images
+            if isinstance(filename, str) and filename
+        ]
+        if len(valid_names) != len(meal_images):
+            self.errors.append(f"餐次 {meal_id}.images 只能包含非空文件名")
+        duplicates = sorted(
+            {
+                filename
+                for filename in valid_names
+                if valid_names.count(filename) > 1
+            }
+        )
+        if duplicates:
+            self.errors.append(
+                f"餐次 {meal_id}.images 含重复图片：{', '.join(duplicates)}"
+            )
+        for filename in valid_names:
             if filename not in self.manifest_files:
                 self.errors.append(f"餐次 {meal_id} 引用了不存在的图片：{filename}")
+                continue
+            image = self.image_records.get(filename)
+            if image is not None and image.get("classification") != "consumed_food":
+                self.errors.append(
+                    f"餐次 {meal_id} 引用了非确认摄入图片：{filename} "
+                    f"({image.get('classification')})"
+                )
 
     def _validate_item(self, meal_id: str, item_index: int, item: Any) -> None:
         prefix = f"餐次 {meal_id}.items[{item_index}]"
@@ -297,15 +323,31 @@ class AnalysisValidator:
         for filename, row in self.image_records.items():
             classification = row.get("classification")
             meal_id = row.get("meal_id")
+            linked_meals = [
+                candidate_id
+                for candidate_id, meal in self.meal_records.items()
+                if isinstance(meal.get("images"), list)
+                and filename in meal["images"]
+            ]
             if classification == "consumed_food":
                 if meal_id not in self.meal_records:
                     self.errors.append(
                         f"{filename} 标记为 consumed_food，但 meal_id 无效"
                     )
-                elif filename not in self.meal_records[meal_id].get("images", []):
+                elif not isinstance(
+                    self.meal_records[meal_id].get("images"), list
+                ) or filename not in self.meal_records[meal_id]["images"]:
                     self.errors.append(f"{filename} 未列入餐次 {meal_id} 的 images")
-            elif meal_id not in {None, ""} and meal_id not in self.meal_records:
-                self.errors.append(f"{filename} 的 meal_id 无效：{meal_id}")
+                other_meals = [value for value in linked_meals if value != meal_id]
+                if other_meals:
+                    self.errors.append(
+                        f"{filename} 还被列入其他餐次：{', '.join(other_meals)}"
+                    )
+            elif classification in {"possible_food", "unrelated"}:
+                if meal_id not in {None, ""}:
+                    self.errors.append(
+                        f"{filename} 分类为 {classification}，meal_id 必须为空"
+                    )
 
     def _validate_assessment_and_metadata(self) -> None:
         assessment = self.analysis.get("assessment")
@@ -344,6 +386,25 @@ def validate_analysis(
     analysis: dict[str, Any], manifest: dict[str, Any]
 ) -> tuple[list[str], list[str]]:
     return AnalysisValidator(analysis, manifest).validate()
+
+
+def image_classification_counts(analysis: dict[str, Any]) -> dict[str, int]:
+    """Count reviewed photos without treating possible food as consumed."""
+
+    counts = {classification: 0 for classification in CLASSIFICATIONS}
+    for row in analysis.get("images", []):
+        classification = row.get("classification")
+        if classification in counts:
+            counts[classification] += 1
+    counts["food_related"] = sum(
+        counts[classification] for classification in FOOD_RELATED_CLASSIFICATIONS
+    )
+    counts["reviewed"] = sum(
+        count
+        for classification, count in counts.items()
+        if classification in CLASSIFICATIONS and classification != "unreviewed"
+    )
+    return counts
 
 
 def sum_nutrition(analysis: dict[str, Any]) -> dict[str, list[float]]:

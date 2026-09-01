@@ -8,6 +8,9 @@ This repository separates reusable source from private health data. Never transm
 - Private operational settings: `config/health_profile.json` selects one active
   `profile_id` and controls paths, privacy, and the Shortcut. It must not become
   a second source for personal facts.
+- Private reminder settings: `config/reminder.local.json` stores the active
+  owner's local daily time and notification preference. The corresponding
+  LaunchAgent lives outside the repository under `~/Library/LaunchAgents/`.
 - Durable private records: `data/`. The canonical personal context is
   `data/profiles/<profile_id>/profile.json`; its structured medical index and
   raw records live under the same profile. Original food media and
@@ -34,6 +37,8 @@ This repository separates reusable source from private health data. Never transm
   orchestrates personal-profile initialization, migration, validation, and
   rendering. They may compose domain code and adapters, but adapters must not
   import them.
+- `reminder.py` owns the validated schedule/config model;
+  `reminder_workflow.py` owns local notification and launchd orchestration.
 - `analysis.py`, `nutrition.py`, `tracking.py`, `tracking_summary.py`,
   `personal_profile.py`, and `summary.py` are the domain layer. They must
   not import CLI, filesystem, media, presentation, network, or SQLite adapters.
@@ -105,3 +110,16 @@ wants existing files analyzed or when testing downstream code.
 - Per-meal protein is derived from meal items. Count heme-iron and oily-fish
   frequency only from reviewed meal tags. Never infer direct water, body
   measurements, sleep, training RPE, or supplement timing from photos.
+
+## Daily local reminder
+
+- Set or update it with `./bin/diet reminder set --time HH:MM`; use
+  `--open-dashboard` only when the user wants the portal opened automatically.
+- Use a generic lock-screen-safe message unless the user explicitly supplies
+  different text. Never place diagnoses, medicines, measurements, or raw
+  medical details in a notification by default.
+- Verify with `./bin/diet reminder status` and, when the user asked to see a
+  notification, `./bin/diet reminder test`. Remove it with
+  `./bin/diet reminder remove`.
+- The ignored reminder config and workspace-specific external LaunchAgent are local operational
+  state. Do not commit the plist or its clone-specific absolute paths.

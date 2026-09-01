@@ -1,6 +1,6 @@
 ---
 name: daily-diet-pipeline
-description: Run the repository's local Apple Photos diet workflow; initialize, validate, or render its private personal profile and medical-record index; create or repair schema-v3 meal and health tracking with explicit provenance; query USDA FoodData Central; or generate local 7/30-day summaries. Do not use for unrelated general nutrition questions.
+description: Run the repository's local Apple Photos diet workflow; initialize, validate, or render its private personal profile and medical-record index; set a private macOS daily reminder; create or repair schema-v3 meal and health tracking with explicit provenance; query USDA FoodData Central; or generate local 7/30-day summaries. Do not use for unrelated general nutrition questions.
 ---
 
 # Daily Diet Pipeline
@@ -11,6 +11,7 @@ Use the repository as the executable source of truth. Find its root by locating 
 
 - Dated food-photo analysis: follow **Daily analysis**.
 - Personal background, health status, or past medical records: follow **Personal profile**.
+- Daily notification setup or troubleshooting: follow **Daily reminder**.
 - Existing report is stale or broken: run `./bin/diet status DATE`, then repair the earliest failing stage.
 - 7/30-day pattern review: follow **Longitudinal summary**.
 - Exact single-food composition or gram scaling: follow **FoodData Central lookup**.
@@ -68,6 +69,25 @@ Use the repository as the executable source of truth. Find its root by locating 
 - The food-related screening set is `consumed_food` plus `possible_food`, but only `consumed_food` enters meal reconstruction and nutrient totals. Use `possible_food` when the image may not represent the user's intake; use `unrelated` for non-food media. Never leave `unreviewed` in a final analysis.
 - Record visible facts in `observations`. Put uncertain identity, recipe, oil, sauce, shared amount, and consumed fraction in `uncertainties`.
 - Keep `photo_coverage` as `partial` unless the evidence supports a complete day. Do not turn missing meals into zero intake.
+
+## Daily reminder
+
+1. Require an explicit local `HH:MM` before installing or changing a schedule;
+   do not infer a time from sleep or meal records.
+2. Run `./bin/diet reminder set --time HH:MM`. Add `--open-dashboard` only when
+   the user wants the private portal opened automatically. Preserve an existing
+   custom message when the user changes only the time.
+3. Keep the default notification generic because macOS may display it on the
+   lock screen. Do not add diagnoses, medicines, measurements, or medical-record
+   details unless the user explicitly supplies that exact text and accepts the
+   screen-privacy implication.
+4. Run `./bin/diet reminder status`. Use `./bin/diet reminder test` only when the
+   user asked to receive a visible test notification. Remove the schedule with
+   `./bin/diet reminder remove`.
+5. Treat `config/reminder.local.json`, `runtime/reminders/`, and the generated
+   `~/Library/LaunchAgents/io.local-healthlog.reminder.<profile_id>.<workspace_id>.plist` as
+   private local state. Never stage or publish them. If the clone moves or its
+   Python changes, rerun `set` so the absolute paths are regenerated.
 
 ## Estimate nutrition with provenance
 
@@ -174,7 +194,7 @@ The report must:
 - Do not use `--reset-analysis` on meaningful work without preserving it.
 - SQLite under `runtime/state/` is derived and rebuildable. The dated
   `analysis.json` under `data/daily/` remains the reviewable canonical record.
-- Keep `config/health_profile.json`, private contents of `data/`, `runtime/`, `site/`, and
+- Keep `config/health_profile.json`, `config/reminder.local.json`, private contents of `data/`, `runtime/`, `site/`, and
   `build/` out of Git. Never introduce root-level compatibility aliases such as
   `daily`. Run `python3 scripts/check_privacy.py --staged` before committing
   repository changes.

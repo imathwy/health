@@ -1,4 +1,4 @@
-# Private local profile
+# Private local operational settings
 /config/health_profile.json
 /config/*.local.json
 /.privacy.local

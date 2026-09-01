@@ -5,9 +5,10 @@ The repository has six explicit boundaries:
 1. **Tracked application** — `src/healthlog/` separates its CLI adapter,
    application orchestration, nutrition domain, and external adapters. The
    module map below defines ownership and import direction.
-2. **Platform bridge** — `scripts/build_shortcut.py` creates a clone-specific
+2. **Platform bridges** — `scripts/build_shortcut.py` creates a clone-specific
    Apple Shortcut. Python does not request Photos access; the Shortcut owns that
-   permission and writes directly into `data/daily/`.
+   permission and writes directly into `data/daily/`. An optional user
+   LaunchAgent invokes only the reminder command and owns no health records.
 3. **Durable private records** — `data/daily/YYYYMMDD/` contains unmodified media
    and the human-reviewed `analysis.json`.
    `data/profiles/<profile_id>/profile.json` is the personal source of truth;
@@ -29,18 +30,21 @@ The repository has six explicit boundaries:
 | Layer | Modules | Ownership |
 |---|---|---|
 | Entry adapter | `cli`, `__main__` | Parse arguments, route commands, translate expected failures to exit codes |
-| Application | `commands`, `profile_workflow` | Orchestrate dated and personal-profile workflows; compose ports/adapters |
-| Domain | `analysis`, `nutrition`, `tracking`, `tracking_summary`, `personal_profile`, `summary` | Analysis and personal/medical schemas, nutrient vocabulary, interval math, daily observations, meal-derived metrics, validation, target comparison, longitudinal summaries |
-| External adapters | `workspace`, `media`, `presentation`, `profile_presentation`, `store`, `fdc` | Filesystem/config, Shortcuts and previews, daily/portal HTML, personal-profile HTML, SQLite, USDA HTTP |
+| Application | `commands`, `profile_workflow`, `reminder_workflow` | Orchestrate dated, personal-profile, and local reminder workflows; compose ports/adapters |
+| Domain | `analysis`, `nutrition`, `tracking`, `tracking_summary`, `personal_profile`, `reminder`, `summary` | Analysis, personal/medical, and reminder schemas; nutrient vocabulary, interval math, validation, target comparison, and summaries |
+| External adapters | `workspace`, `media`, `presentation`, `profile_presentation`, `store`, `fdc` | Filesystem/config, Shortcuts and previews, HTML, SQLite, USDA HTTP |
 | Foundation | `errors` | Stable application error shared by inward and outward layers |
 
 ```mermaid
 flowchart TD
     CLI[cli / __main__] --> APP[commands]
     CLI --> PROFILEAPP[profile_workflow]
+    CLI --> REMINDERAPP[reminder_workflow]
     APP --> ANALYSIS[analysis]
     APP --> PROFILEAPP
     PROFILEAPP --> PROFILE[personal_profile]
+    REMINDERAPP --> REMINDER[reminder]
+    REMINDERAPP --> WORKSPACE
     APP --> SUMMARY[summary]
     APP --> WORKSPACE[workspace]
     APP --> MEDIA[media]
@@ -81,6 +85,13 @@ and roots there. `workspace.load_profile()` validates and projects the canonical
 durable profile into the existing analysis context, so daily code has one source
 for demographics, targets, diet context, and health guardrails. Schema-v1 files
 remain readable long enough to run the explicit migration.
+
+The optional reminder keeps a second, narrower operational document at
+`config/reminder.local.json`. `reminder.py` validates local time and notification
+preferences; `reminder_workflow.py` alone writes the external LaunchAgent and
+invokes `launchctl`, `osascript`, or `open`. The plist contains the clone path
+and current Python executable, so it is generated local state rather than
+portable configuration.
 
 ```mermaid
 flowchart LR

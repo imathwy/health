@@ -18,6 +18,7 @@ from .personal_profile import (
 )
 from .presentation import audit_static_html, update_dashboard
 from .profile_presentation import render_personal_profile_html
+from .reminder_workflow import reminder_state
 from .workspace import (
     PersonalProfilePaths,
     SETTINGS_PATH,
@@ -113,6 +114,7 @@ def _render_outputs(
         profile_source=relative_private_path(paths.profile_json),
         medical_index_source=relative_private_path(paths.medical_index),
         warnings=warnings,
+        reminder=reminder_state(settings),
     )
     atomic_write_text(paths.site_html, page)
     html_errors, html_warnings, _ = audit_static_html(paths.site_html)

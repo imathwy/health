@@ -11,6 +11,8 @@
 ## Never tracked
 
 - `config/health_profile.json` (private operational settings and active ID);
+- `config/reminder.local.json` (private reminder time/message), plus the
+  clone-specific plist installed under `~/Library/LaunchAgents/`;
 - `data/profiles/<profile_id>/profile.json`, every medical index, and every raw
   medical record;
 - anything below `data/` except `data/README.md`;
@@ -27,6 +29,11 @@ links. Open
 it as a local file, or serve only `site/` on `127.0.0.1`. Do not use the
 repository root as an HTTP document root and do not
 publish the portal without a separate, explicit sharing decision.
+
+Daily reminder text may appear on the lock screen. The generated default is
+deliberately generic and contains no condition, medicine, measurement, or
+medical-record detail. A custom message is a user's explicit local choice and
+must still remain outside Git.
 
 If private data is ever committed, removing it in a later commit is insufficient because it remains in history. Stop before pushing, remove it from history with an appropriate history-rewrite tool, rotate any exposed credentials, and verify a fresh clone before publishing.
 

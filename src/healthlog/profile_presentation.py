@@ -35,6 +35,13 @@ PROVENANCE_LABELS = {
     "medical_record": "病历记录",
     "mixed": "用户陈述与病历记录",
 }
+REMINDER_STATUS_LABELS = {
+    "active": "已启用",
+    "configured-not-loaded": "配置存在但未加载",
+    "stale-workspace": "仓库位置已变化，请重新设置",
+    "orphaned-agent": "发现孤立任务，请移除后重设",
+    "disabled": "未启用",
+}
 DIET_CONTEXT_LABELS = {
     "food_photo_means_consumed": "食物照片约定",
     "photo_logging_convention": "拍照记录规则",
@@ -177,6 +184,7 @@ def render_personal_profile_html(
     profile_source: str,
     medical_index_source: str,
     warnings: list[str] | None = None,
+    reminder: dict[str, Any] | None = None,
 ) -> str:
     """Render a self-contained private profile without raw-record links."""
 
@@ -224,6 +232,13 @@ def render_personal_profile_html(
     provenance_source = PROVENANCE_LABELS.get(
         str(provenance.get("source", "")), str(provenance.get("source", ""))
     )
+    reminder = reminder or {"status": "disabled"}
+    reminder_status = REMINDER_STATUS_LABELS.get(
+        str(reminder.get("status", "disabled")),
+        str(reminder.get("status", "disabled")),
+    )
+    reminder_time = reminder.get("time") or "未设置"
+    reminder_open = "是" if reminder.get("open_dashboard") else "否"
 
     return f"""<!doctype html>
 <html lang="zh-CN">
@@ -279,6 +294,15 @@ def render_personal_profile_html(
   </section>
 
   <section class="section"><div class="section-head"><div><p class="eyebrow">Nutrition context</p><h2>目标与饮食背景</h2></div><p>目标属于个人档案；运行配置只负责目录、隐私开关和 Shortcut 名称。</p></div><div class="grid-2"><table><tbody>{_target_rows(targets)}</tbody></table><table><tbody>{diet_rows}</tbody></table></div></section>
+
+  <section class="section"><div class="section-head"><div><p class="eyebrow">Daily reminder</p><h2>每日本地提醒</h2></div><p>提醒由本机 launchd 运行；静态网页只展示状态，不直接修改系统任务。</p></div>
+    <div class="facts">
+      <div class="fact"><span>状态</span><strong>{_escape(reminder_status)}</strong></div>
+      <div class="fact"><span>本地时间</span><strong>{_escape(reminder_time)}</strong></div>
+      <div class="fact"><span>提醒时打开门户</span><strong>{reminder_open}</strong></div>
+      <div class="fact"><span>设置命令</span><strong><code>diet reminder set --time HH:MM</code></strong></div>
+    </div><p class="source-note" style="margin-top:14px">通知可能显示在锁屏；默认文案不包含健康详情。使用 <code>diet reminder test</code> 试发，使用 <code>diet reminder remove</code> 关闭。</p>
+  </section>
 
   <section class="section"><div class="section-head"><div><p class="eyebrow">Safety boundaries</p><h2>补剂与解释边界</h2></div><p>这些规则优先于从单日照片推断出的普通建议。</p></div>{_list(health.get("supplement_guardrails") if isinstance(health, dict) else [], "尚未设置补剂边界")}</section>
 

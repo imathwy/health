@@ -6,6 +6,7 @@ outputs that can be regenerated from `data/` and the local profile:
 - `daily/YYYYMMDD/`: manifests, analysis templates, and rendered daily Markdown
 - `profile/profile.snapshot.json`: validated projection of the active personal
   profile and medical index for local agents
+- `reminders/`: local reminder logs and the last successful fire timestamp
 - `reports/nutrition/`: generated 7/30-day JSON and Markdown summaries
 - `state/healthlog.sqlite3`: the nutrition index and optional USDA response cache
 

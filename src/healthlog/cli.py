@@ -17,12 +17,19 @@ from .commands import (
     nutrition_summary,
     prepare,
     rebuild_database,
+    remove_reminder_command,
     render,
+    set_reminder_command,
     status,
     verify,
 )
 from .errors import PipelineError
 from .profile_workflow import initialize_personal_profile, personal_profile_command
+from .reminder_workflow import (
+    fire_reminder,
+    status_reminder,
+    test_reminder,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -74,6 +81,43 @@ def build_parser() -> argparse.ArgumentParser:
         "profile", help="校验个人档案并生成私有静态简介页"
     )
     profile_parser.set_defaults(func=personal_profile_command)
+
+    reminder_parser = subparsers.add_parser(
+        "reminder", help="设置和管理本机每日定时提醒"
+    )
+    reminder_subparsers = reminder_parser.add_subparsers(
+        dest="reminder_command", required=True
+    )
+    reminder_set_parser = reminder_subparsers.add_parser(
+        "set", help="安装或更新每日提醒"
+    )
+    reminder_set_parser.add_argument(
+        "--time", required=True, help="本地时间，24 小时制 HH:MM"
+    )
+    reminder_set_parser.add_argument("--message", help="自定义通知文字")
+    reminder_set_parser.add_argument(
+        "--open-dashboard",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="触发时是否同时打开本地健康门户",
+    )
+    reminder_set_parser.set_defaults(func=set_reminder_command)
+    reminder_status_parser = reminder_subparsers.add_parser(
+        "status", help="显示提醒时间和加载状态"
+    )
+    reminder_status_parser.set_defaults(func=status_reminder)
+    reminder_test_parser = reminder_subparsers.add_parser(
+        "test", help="立即发送一次测试通知"
+    )
+    reminder_test_parser.set_defaults(func=test_reminder)
+    reminder_remove_parser = reminder_subparsers.add_parser(
+        "remove", help="关闭并移除每日提醒"
+    )
+    reminder_remove_parser.set_defaults(func=remove_reminder_command)
+    reminder_fire_parser = reminder_subparsers.add_parser(
+        "fire", help="发送提醒（通常由 launchd 调用）"
+    )
+    reminder_fire_parser.set_defaults(func=fire_reminder)
 
     db_status_parser = subparsers.add_parser(
         "db-status", help="显示本地 SQLite 营养索引状态"
@@ -143,6 +187,7 @@ def main(argv: list[str] | None = None) -> int:
         "doctor",
         "profile-init",
         "profile",
+        "reminder",
         "db-status",
         "rebuild-db",
         "summary",

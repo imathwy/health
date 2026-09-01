@@ -175,6 +175,7 @@ class PersonalProfileTests(unittest.TestCase):
         self.assertEqual(audit.references, [])
         self.assertIn("Example examination", page_text)
         self.assertIn("原件 1 份", page_text)
+        self.assertIn("每日本地提醒", page_text)
         self.assertNotIn("private-record.pdf", page_text)
 
     def test_cli_initializes_and_renders_a_schema_v2_profile(self) -> None:

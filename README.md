@@ -61,6 +61,7 @@ The setup script:
 - optionally installs user-level links for the `diet` command and Codex Skill;
 - builds and signs a clone-specific Shortcut containing the correct absolute
   paths;
+- optionally installs a local daily reminder with `--reminder-time HH:MM`;
 - initializes the private SQLite database and runs environment diagnostics.
 
 Apple requires the first Shortcut import to be performed manually and asks for
@@ -90,6 +91,26 @@ settings. The generated `site/profile/index.html` shows structured body status,
 conditions, symptoms, medicines, allergies, activity, targets, and a medical
 timeline. It displays the count of raw records but never includes their names,
 paths, or links. See the [personal profile boundary](docs/personal-profile.md).
+
+## Daily local reminder
+
+Users can install one private macOS notification for the active profile. The
+time is strict 24-hour local time; the default lock-screen text is generic, and
+opening the health portal is opt-in.
+
+```bash
+diet reminder set --time 21:30
+diet reminder set --time 21:30 --open-dashboard
+diet reminder status
+diet reminder test
+diet reminder remove
+```
+
+The ignored preference lives in `config/reminder.local.json`; the generated
+LaunchAgent lives under `~/Library/LaunchAgents/`. Moving the clone or changing
+its Python installation requires running `set` again. Setup can install it with
+`./scripts/setup.sh --reminder-time 21:30`. See [daily reminder ownership and
+privacy](docs/reminders.md).
 
 ## Daily analysis
 
@@ -211,7 +232,8 @@ not the only copy of the records.
 ├── config/
 │   ├── health_profile.example.json
 │   ├── personal_profile.example.json
-│   └── health_profile.json      # Private operational settings; ignored
+│   ├── health_profile.json      # Private operational settings; ignored
+│   └── reminder.local.json      # Private daily reminder preference; ignored
 ├── data/                        # Durable private records; ignored
 │   ├── daily/YYYYMMDD/          # Original media + canonical analysis.json
 │   ├── profiles/<id>/
@@ -233,12 +255,14 @@ not the only copy of the records.
 │   ├── cli.py                   # Argument parsing and exit codes
 │   ├── commands.py              # Use-case orchestration
 │   ├── profile_workflow.py      # Profile migration/render orchestration
+│   ├── reminder_workflow.py     # launchd and notification orchestration
 │   ├── analysis.py              # Analysis schema, validation, targets
 │   ├── nutrition.py             # Nutrition vocabulary and interval aggregation
 │   ├── tracking.py              # Water, calcium, recovery, body, and meal metrics
 │   ├── tracking_summary.py      # Longitudinal tracking aggregation and coverage
 │   ├── summary.py               # Longitudinal summary domain logic
 │   ├── personal_profile.py      # Personal/medical schemas and validation
+│   ├── reminder.py              # Daily reminder configuration model
 │   ├── workspace.py             # Config, path boundaries, atomic file I/O
 │   ├── media.py                 # Shortcut, media manifest, previews
 │   ├── presentation.py          # Markdown, HTML, local portal
@@ -275,7 +299,7 @@ licenses.
 
 Application dependencies flow in one direction: `cli → commands →
 domain/adapters`. The `analysis`, `nutrition`, `tracking`, `tracking_summary`,
-`personal_profile`, and `summary` domain modules do
+`personal_profile`, `reminder`, and `summary` domain modules do
 not import filesystem, media, presentation, SQLite, or network adapters. See
 the [architecture document](docs/architecture.md) for module ownership and the
 dependency graph.

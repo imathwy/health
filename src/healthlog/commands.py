@@ -50,6 +50,9 @@ from .profile_workflow import (
     refresh_personal_profile_if_available,
     validate_personal_profile_sources,
 )
+from .reminder_workflow import reminder_state
+from .reminder_workflow import remove_reminder as remove_reminder_source
+from .reminder_workflow import set_reminder as set_reminder_source
 from .store import NutritionStore
 from .summary import json_text as summary_json_text
 from .summary import make_summary, render_html as render_summary_html
@@ -615,6 +618,32 @@ def dashboard_command(_: argparse.Namespace) -> int:
     return 0
 
 
+def set_reminder_command(args: argparse.Namespace) -> int:
+    """Install a reminder, then refresh the derived profile and portal views."""
+
+    profile = load_profile()
+    result = set_reminder_source(args)
+    refresh_personal_profile_if_available(profile)
+    dashboard_path = update_dashboard(profile)
+    print(f"DASHBOARD={dashboard_path}")
+    return result
+
+
+def remove_reminder_command(args: argparse.Namespace) -> int:
+    """Remove a reminder, then refresh the derived profile and portal views."""
+
+    result = remove_reminder_source(args)
+    try:
+        profile = load_profile()
+    except PipelineError as exc:
+        print(f"WARNING=提醒已移除，但个人档案页面未刷新：{exc}")
+        return result
+    refresh_personal_profile_if_available(profile)
+    dashboard_path = update_dashboard(profile)
+    print(f"DASHBOARD={dashboard_path}")
+    return result
+
+
 def fdc_api_key() -> tuple[str, str]:
     if os.environ.get("FDC_API_KEY"):
         return str(os.environ["FDC_API_KEY"]), "FDC_API_KEY"
@@ -855,6 +884,12 @@ def doctor(_: argparse.Namespace) -> int:
         _, profile_warnings = validate_personal_profile_sources(profile)
         for warning in profile_warnings:
             print(f"WARNING=个人档案：{warning}")
+        local_reminder = reminder_state(profile)
+        print(f"REMINDER={local_reminder['status']}")
+        if local_reminder["time"]:
+            print(f"REMINDER_TIME={local_reminder['time']}")
+        if local_reminder["status"] not in {"active", "disabled"}:
+            failures += 1
         shortcut_name = profile["pipeline"]["shortcut_name"]
         paths = paths_for(date.today(), profile)
         print(f"SHORTCUT_NAME={shortcut_name}")

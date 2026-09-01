@@ -6,6 +6,8 @@ install_links=true
 build_shortcut=true
 open_shortcut=false
 signed_shortcut=""
+reminder_time=""
+reminder_open_dashboard=false
 
 while (( $# )); do
   case "$1" in
@@ -18,13 +20,28 @@ while (( $# )); do
     --open-shortcut)
       open_shortcut=true
       ;;
+    --reminder-time)
+      if (( $# < 2 )); then
+        print -u2 -- "--reminder-time requires HH:MM"
+        exit 64
+      fi
+      reminder_time=$2
+      shift
+      ;;
+    --reminder-open-dashboard)
+      reminder_open_dashboard=true
+      ;;
     -h|--help)
       cat <<'HELP_EOF'
 Usage: ./scripts/setup.sh [--no-install] [--skip-shortcut] [--open-shortcut]
+                          [--reminder-time HH:MM] [--reminder-open-dashboard]
 
   --no-install      Do not create ~/.local/bin or ~/.codex/skills links
   --skip-shortcut   Do not build and sign the Apple Photos Shortcut
   --open-shortcut   Open the signed Shortcut for one-time import
+  --reminder-time   Install a local daily reminder at HH:MM
+  --reminder-open-dashboard
+                    Open the local portal when the reminder fires
 HELP_EOF
       exit 0
       ;;
@@ -35,6 +52,11 @@ HELP_EOF
   esac
   shift
 done
+
+if $reminder_open_dashboard && [[ -z "$reminder_time" ]]; then
+  print -u2 -- "--reminder-open-dashboard requires --reminder-time HH:MM"
+  exit 64
+fi
 
 if [[ $(uname -s) != Darwin ]]; then
   print -u2 -- "This Apple Photos workflow requires macOS."
@@ -116,6 +138,14 @@ if $build_shortcut; then
   fi
 fi
 
+if [[ -n "$reminder_time" ]]; then
+  reminder_args=(reminder set --time "$reminder_time")
+  if $reminder_open_dashboard; then
+    reminder_args+=(--open-dashboard)
+  fi
+  "$project_root/bin/diet" "${reminder_args[@]}"
+fi
+
 "$project_root/bin/diet" doctor
 
 print -- "Setup complete."
@@ -124,3 +154,6 @@ if $build_shortcut && ! $open_shortcut; then
   print -- "  open '$signed_shortcut'"
 fi
 print -- "Then edit the generated PROFILE_JSON, run 'diet profile', and analyze a day with: diet yesterday"
+if [[ -z "$reminder_time" ]]; then
+  print -- "Optional daily reminder: diet reminder set --time 21:30"
+fi

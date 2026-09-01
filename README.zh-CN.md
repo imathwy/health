@@ -43,6 +43,7 @@ cd local-healthlog
 - 创建长期记录目录 `data/`、机器运行目录 `runtime/` 与网页展示目录 `site/`；
 - 可选安装 `diet` 与 Codex Skill 的用户级链接；
 - 为当前 clone 的绝对路径构建并签名 Shortcut；
+- 可通过 `--reminder-time HH:MM` 安装本地每日提醒；
 - 初始化私有 SQLite 并运行环境检查。
 
 Apple 要求首次手工导入 Shortcut，并允许它读取 Photos。完成后编辑初始化输出中的 `PROFILE_JSON`，再运行 `diet profile` 校验并重建私有页面。纯代码或 CI 式检查可以运行：
@@ -61,6 +62,20 @@ diet profile                  # 校验并重建个人简介页与门户
 ```
 
 旧 schema-v1 工作区可以运行 `diet profile-init --migrate-config`：命令会先在私有档案中保存旧配置备份，再把个人事实从运行配置迁出。生成的 `site/profile/index.html` 展示身体状况、疾病或症状、药物、过敏、活动、目标和病历时间线；它只显示原件数量，不写入原件名称、路径或链接。详见 [个人档案边界](docs/personal-profile.md)。
+
+## 每日本地提醒
+
+每个活动用户可以设置一个 macOS 本地通知。时间使用严格的 24 小时制本地时间；默认锁屏文案不含健康详情，是否在提醒时打开健康门户由用户显式选择。
+
+```bash
+diet reminder set --time 21:30
+diet reminder set --time 21:30 --open-dashboard
+diet reminder status
+diet reminder test
+diet reminder remove
+```
+
+被忽略的偏好保存在 `config/reminder.local.json`，生成的 LaunchAgent 位于 `~/Library/LaunchAgents/`。移动仓库或更换 Python 后重新运行 `set`。初始化时也可以传入 `./scripts/setup.sh --reminder-time 21:30`。详见 [提醒的边界与隐私](docs/reminders.md)。
 
 ## 每日分析
 
@@ -140,7 +155,8 @@ diet db-status
 ├── config/
 │   ├── health_profile.example.json
 │   ├── personal_profile.example.json
-│   └── health_profile.json      # 私有运行配置、忽略
+│   ├── health_profile.json      # 私有运行配置、忽略
+│   └── reminder.local.json      # 私有每日提醒偏好、忽略
 ├── data/                        # 长期私有记录、忽略
 │   ├── daily/YYYYMMDD/          # 原始媒体 + canonical analysis.json
 │   ├── profiles/<id>/
@@ -162,12 +178,14 @@ diet db-status
 │   ├── cli.py                   # 参数解析与退出码
 │   ├── commands.py              # 用例编排
 │   ├── profile_workflow.py      # 个人档案迁移与展示用例
+│   ├── reminder_workflow.py     # launchd 与通知编排
 │   ├── analysis.py              # 分析 schema、验证与目标比较
 │   ├── nutrition.py             # 营养领域词汇与区间聚合
 │   ├── tracking.py              # 饮水、钙、恢复、体测与餐次派生指标
 │   ├── tracking_summary.py      # 扩展指标的长期聚合与覆盖规则
 │   ├── summary.py               # 长期汇总领域逻辑
 │   ├── personal_profile.py      # 个人档案/病历 schema 与校验
+│   ├── reminder.py              # 每日提醒配置模型
 │   ├── workspace.py             # 配置、路径边界与原子文件 I/O
 │   ├── media.py                 # Shortcut、媒体清单与预览
 │   ├── presentation.py          # Markdown、HTML 与本地门户
@@ -193,7 +211,7 @@ Git 只应包含代码、文档、示例配置和 Skill。个人档案、照片�
 本项目从现有营养 Skills 借鉴了接口思想，并独立实现了适合照片证据的来源模型；取舍与许可证见 [上游设计审查](docs/upstream-inspirations.md)。
 
 应用代码遵循单向依赖：`cli → commands → domain/adapters`，领域模块
-`analysis / nutrition / tracking / tracking_summary / personal_profile / summary` 不反向导入文件系统、媒体、网页、SQLite
+`analysis / nutrition / tracking / tracking_summary / personal_profile / reminder / summary` 不反向导入文件系统、媒体、网页、SQLite
 或网络适配器。具体职责和依赖图见 [架构](docs/architecture.md)。
 
 ## 许可证

@@ -48,6 +48,7 @@ class LayerBoundaryTests(unittest.TestCase):
             "presentation",
             "profile_presentation",
             "profile_workflow",
+            "reminder_workflow",
             "store",
             "workspace",
         }
@@ -56,6 +57,7 @@ class LayerBoundaryTests(unittest.TestCase):
             "analysis",
             "nutrition",
             "personal_profile",
+            "reminder",
             "tracking",
             "tracking_summary",
             "summary",
@@ -84,7 +86,10 @@ class LayerBoundaryTests(unittest.TestCase):
             "data/profiles/researcher-1/profile.json",
         )
         self.assertEqual(paths.medical_index.name, "index.json")
-        self.assertEqual(paths.site_html.relative_to(PROJECT_ROOT).as_posix(), "site/profile/index.html")
+        self.assertEqual(
+            paths.site_html.relative_to(PROJECT_ROOT).as_posix(),
+            "site/profile/index.html",
+        )
 
     def test_rejects_overlapping_private_roots(self) -> None:
         with self.assertRaisesRegex(PipelineError, "互不包含"):

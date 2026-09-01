@@ -21,6 +21,7 @@ from .personal_profile import (
 DEFAULT_ROOT = Path(__file__).resolve().parents[2]
 ROOT = Path(os.environ.get("HEALTHLOG_ROOT", str(DEFAULT_ROOT))).expanduser().resolve()
 SETTINGS_PATH = ROOT / "config" / "health_profile.json"
+REMINDER_SETTINGS_PATH = ROOT / "config" / "reminder.local.json"
 PIPELINE_DIR_NAME = "pipeline"
 MANIFEST_NAME = "manifest.json"
 ANALYSIS_NAME = "analysis.json"

@@ -18,6 +18,7 @@ ALLOWED_SITE_FILES = {"site/README.md"}
 FORBIDDEN_EXACT = {
     ".env",
     "config/health_profile.json",
+    "config/reminder.local.json",
 }
 FORBIDDEN_PREFIXES = (
     "build/",

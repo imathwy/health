@@ -16,3 +16,6 @@ browser-facing HTML and display images belong in `site/`. Do not create
 root-level aliases such as `daily`. Do not force-add
 files from these folders; the pre-commit privacy check rejects them even if
 `.gitignore` is bypassed.
+
+Daily reminder preferences are operational state in
+`config/reminder.local.json`; they are not durable health records.

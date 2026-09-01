@@ -36,6 +36,23 @@ NUTRITION_SOURCE_TYPES = {
     "unknown",
 }
 PROFILE_REFERENCE = "data/profiles/<active_profile_id>/profile.json"
+PURGED_STORAGE_STATE = "purged_unrelated"
+
+
+def _image_template_row(asset: dict[str, Any]) -> dict[str, Any]:
+    purged = asset.get("storage_state") == PURGED_STORAGE_STATE
+    row: dict[str, Any] = {
+        "file": asset["file"],
+        "classification": "unrelated" if purged else "unreviewed",
+        "meal_id": None,
+        "observations": (
+            ["先前已检查为与饮食无关；health 工作区副本已清理"] if purged else []
+        ),
+        "uncertainties": [],
+    }
+    if purged:
+        row["reviewed_sha256"] = asset.get("sha256")
+    return row
 
 
 def analysis_template(
@@ -54,16 +71,7 @@ def analysis_template(
             "photo_coverage": "unknown",
             "notes": [],
         },
-        "images": [
-            {
-                "file": asset["file"],
-                "classification": "unreviewed",
-                "meal_id": None,
-                "observations": [],
-                "uncertainties": [],
-            }
-            for asset in manifest.get("assets", [])
-        ],
+        "images": [_image_template_row(asset) for asset in manifest.get("assets", [])],
         "meals": [],
         "tracking": tracking_template(),
         "assessment": {
@@ -102,6 +110,11 @@ class AnalysisValidator:
         self.errors: list[str] = []
         self.warnings: list[str] = []
         self.schema_version = analysis.get("schema_version")
+        self.manifest_assets = {
+            asset["file"]: asset
+            for asset in manifest.get("assets", [])
+            if isinstance(asset, dict) and isinstance(asset.get("file"), str)
+        }
         self.manifest_files = {asset["file"] for asset in manifest.get("assets", [])}
         self.day_context: dict[str, Any] = {}
         self.day_type: Any = None
@@ -116,9 +129,7 @@ class AnalysisValidator:
         self._validate_meals()
         self._validate_image_meal_links()
         if self.schema_version == 3:
-            validate_tracking(
-                self.analysis.get("tracking"), self.errors, self.warnings
-            )
+            validate_tracking(self.analysis.get("tracking"), self.errors, self.warnings)
         self._validate_assessment_and_metadata()
         self._add_warnings()
         return self.errors, self.warnings
@@ -170,6 +181,22 @@ class AnalysisValidator:
             self.errors.append(f"{filename} 的 classification 无效：{classification!r}")
         elif classification == "unreviewed":
             self.errors.append(f"{filename} 尚未检查")
+        asset = self.manifest_assets.get(filename)
+        if asset is not None:
+            storage_state = asset.get("storage_state", "retained")
+            if storage_state == PURGED_STORAGE_STATE and classification != "unrelated":
+                self.errors.append(
+                    f"{filename} 的工作区副本已清理，只能保持 unrelated 分类"
+                )
+            reviewed_sha256 = row.get("reviewed_sha256")
+            if reviewed_sha256 is not None and reviewed_sha256 != asset.get("sha256"):
+                self.errors.append(f"{filename}.reviewed_sha256 与当前媒体不一致")
+            if asset.get("review_required") is True and reviewed_sha256 != asset.get(
+                "sha256"
+            ):
+                self.errors.append(
+                    f"{filename} 的内容哈希已变化；重新检查后写入 reviewed_sha256"
+                )
         for key in ("observations", "uncertainties"):
             if not isinstance(row.get(key), list):
                 self.errors.append(f"{filename}.{key} 必须是数组")
@@ -205,9 +232,7 @@ class AnalysisValidator:
         if not isinstance(meal.get("label"), str) or not meal.get("label"):
             self.errors.append(f"餐次 {meal_id} 缺少 label")
         if self.schema_version == 3:
-            validate_meal_tracking_tags(
-                meal, f"餐次 {meal_id}", self.errors
-            )
+            validate_meal_tracking_tags(meal, f"餐次 {meal_id}", self.errors)
         self._validate_meal_images(meal_id, meal.get("images"))
         items = meal.get("items")
         if not isinstance(items, list) or not items:
@@ -228,11 +253,7 @@ class AnalysisValidator:
         if len(valid_names) != len(meal_images):
             self.errors.append(f"餐次 {meal_id}.images 只能包含非空文件名")
         duplicates = sorted(
-            {
-                filename
-                for filename in valid_names
-                if valid_names.count(filename) > 1
-            }
+            {filename for filename in valid_names if valid_names.count(filename) > 1}
         )
         if duplicates:
             self.errors.append(
@@ -331,17 +352,17 @@ class AnalysisValidator:
             linked_meals = [
                 candidate_id
                 for candidate_id, meal in self.meal_records.items()
-                if isinstance(meal.get("images"), list)
-                and filename in meal["images"]
+                if isinstance(meal.get("images"), list) and filename in meal["images"]
             ]
             if classification == "consumed_food":
                 if meal_id not in self.meal_records:
                     self.errors.append(
                         f"{filename} 标记为 consumed_food，但 meal_id 无效"
                     )
-                elif not isinstance(
-                    self.meal_records[meal_id].get("images"), list
-                ) or filename not in self.meal_records[meal_id]["images"]:
+                elif (
+                    not isinstance(self.meal_records[meal_id].get("images"), list)
+                    or filename not in self.meal_records[meal_id]["images"]
+                ):
                     self.errors.append(f"{filename} 未列入餐次 {meal_id} 的 images")
                 other_meals = [value for value in linked_meals if value != meal_id]
                 if other_meals:

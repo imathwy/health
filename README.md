@@ -12,13 +12,15 @@ records, and 7/30-day summaries in one private health portal.
 ```mermaid
 flowchart LR
     A[Date] --> B[Apple Photos Shortcut]
-    B --> C[Local original media]
+    B --> C[Temporary local export candidates]
     C --> D[Manifest in runtime]
     C --> P[Web previews in site]
     D --> E[Codex reviews every image]
     P --> E
     E --> S[Food relevance screening]
-    S --> N[Meal reconstruction and nutrition]
+    S --> R[Retain consumed / possible food]
+    S --> Q[Hash-audit and purge unrelated workspace copies]
+    R --> N[Meal reconstruction and nutrition]
     X[Private profile and medical index] --> N
     U[Optional USDA text lookup] --> N
     N --> F[analysis.json v3]
@@ -28,8 +30,8 @@ flowchart LR
     H --> I[7 / 30-day summaries]
 ```
 
-The core constraints are simple: original media is never modified, private data
-never enters Git, photo evidence and nutrition-composition sources remain
+The core constraints are simple: Apple Photos originals are never modified,
+private data never enters Git, photo evidence and nutrition-composition sources remain
 separate, and every estimate preserves lower and upper bounds instead of
 presenting a midpoint as a measurement.
 
@@ -37,8 +39,10 @@ Every exported asset is inspected before nutrition analysis. `consumed_food`
 and `possible_food` form the food-related screening set, while only
 `consumed_food` may link to a meal or contribute nutrients. Package-only food or
 drink photos count as consumed when the local profile enables that rule;
-`possible_food` waits for confirmation, and `unrelated` remains in a collapsed
-audit section instead of cluttering the diet gallery.
+`possible_food` waits for confirmation and remains local. After validation,
+`unrelated` export copies and their derived previews are deleted from the health
+workspace; only classification and hash audit metadata remain. Apple Photos is
+never asked to delete anything.
 
 ## Clone and bootstrap
 
@@ -133,8 +137,9 @@ diet dashboard
 write only to `data/daily/YYYYMMDD/`; the CLI rejects root-level aliases and
 paths returned through symlinks. `render` writes Markdown to `runtime/`, writes
 HTML and browser assets to `site/`, and synchronizes the portal and SQLite.
-`verify` checks original-media hashes, previews, the schema, static links,
-directory boundaries, reports, the portal, and the database hash.
+`verify` checks retained-media hashes, purged-media tombstones and audit hashes,
+previews, the schema, static links, directory boundaries, reports, the portal,
+and the database hash. See [media retention and deletion boundaries](docs/media-retention.md).
 
 The local entry point is `site/index.html`. Its navigation follows “overview →
 personal profile / health plan / daily diet / trends → detailed report” and
@@ -235,7 +240,7 @@ not the only copy of the records.
 │   ├── health_profile.json      # Private operational settings; ignored
 │   └── reminder.local.json      # Private daily reminder preference; ignored
 ├── data/                        # Durable private records; ignored
-│   ├── daily/YYYYMMDD/          # Original media + canonical analysis.json
+│   ├── daily/YYYYMMDD/          # Food-related media + analysis.json + media-audit.json
 │   ├── profiles/<id>/
 │   │   ├── profile.json         # Canonical personal and health context
 │   │   └── medical/             # index.json + untouched files/
@@ -264,7 +269,8 @@ not the only copy of the records.
 │   ├── personal_profile.py      # Personal/medical schemas and validation
 │   ├── reminder.py              # Daily reminder configuration model
 │   ├── workspace.py             # Config, path boundaries, atomic file I/O
-│   ├── media.py                 # Shortcut, media manifest, previews
+│   ├── media.py                 # Shortcut, media manifest and previews
+│   ├── media_retention.py       # Hash audit and bounded unrelated-copy purge
 │   ├── presentation.py          # Markdown, HTML, local portal
 │   ├── profile_presentation.py  # Private profile HTML adapter
 │   ├── store.py                 # Rebuildable SQLite adapter

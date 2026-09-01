@@ -31,7 +31,11 @@ Use the repository as the executable source of truth. Find its root by locating 
 5. Complete food relevance screening before reconstructing meals. Classify every asset as `consumed_food`, `possible_food`, or `unrelated`; only `consumed_food` may link to a meal or contribute to nutrition. Keep `meal_id` empty for the other two classes.
 6. Reconstruct meals from confirmed consumed-food photos, timestamps, before/after pairs, repeated angles, and user statements. Count duplicate views and Live Photo pairs once.
 7. Write schema-v3 `analysis.json`. Every item must include core nutrient ranges, confidence, and `evidence`; every meal must include `tracking_tags`; the top-level `tracking` block preserves non-photo observations and explicit unknowns. Load `references/analysis-schema.md` when authoring or repairing the file.
-8. Run `./bin/diet render DATE`. This validates the analysis, writes Markdown to `runtime/`, writes standalone HTML to `site/`, and transactionally syncs the private SQLite index. The main photo gallery shows food-related assets; unrelated assets remain in a collapsed audit section.
+8. Run `./bin/diet render DATE`. This validates the analysis, removes only
+   `unrelated` export copies and derived previews from the health workspace,
+   records their hashes in the durable private `media-audit.json`, writes the
+   reports, and transactionally syncs SQLite. It does not call Photos or delete
+   Apple Photos originals. `possible_food` remains retained.
 9. Run `./bin/diet verify DATE`. Fix errors until it prints `VERIFY=passed`.
 10. Run `./bin/diet dashboard` if the unified local portal is missing or stale.
 11. Return links to `site/index.html`, the dated runtime Markdown and site HTML, the
@@ -69,6 +73,15 @@ Use the repository as the executable source of truth. Find its root by locating 
 - The food-related screening set is `consumed_food` plus `possible_food`, but only `consumed_food` enters meal reconstruction and nutrient totals. Use `possible_food` when the image may not represent the user's intake; use `unrelated` for non-food media. Never leave `unreviewed` in a final analysis.
 - Record visible facts in `observations`. Put uncertain identity, recipe, oil, sauce, shared amount, and consumed fraction in `uncertainties`.
 - Keep `photo_coverage` as `partial` unless the evidence supports a complete day. Do not turn missing meals into zero intake.
+- The Shortcut must export candidates before they can be inspected. Once all
+  classifications validate, `render` purges only health-workspace copies marked
+  `unrelated` plus their site previews. Never purge `possible_food`,
+  `consumed_food`, Apple Photos originals, or medical/supplement media.
+- Keep `data/daily/YYYYMMDD/media-audit.json`. Its filename, hash, size, and
+  disposition metadata prove the asset was screened without retaining the
+  unrelated photo. A later export with the same hash is removed immediately.
+  If a classification is corrected to food-related, rerun `prepare` without
+  `--skip-export` so Photos can supply a fresh workspace copy.
 
 ## Daily reminder
 
@@ -189,7 +202,9 @@ The report must:
 
 ## Preserve and recover
 
-- Never delete or alter original exported media.
+- Never delete or alter Apple Photos originals. The user has authorized the
+  renderer to delete only validated `unrelated` copies inside the configured
+  daily record directory and their derived site previews.
 - `prepare` preserves an existing `analysis.json`; reconcile `preserved-needs-sync` manually.
 - Do not use `--reset-analysis` on meaningful work without preserving it.
 - SQLite under `runtime/state/` is derived and rebuildable. The dated
@@ -203,7 +218,8 @@ The report must:
 
 The job is complete only when every asset was reviewed, food relevance was
 classified before meal reconstruction, no possible/unrelated photo contributes
-to nutrient totals, duplicates were not double counted, each food has
-source-aware range estimates, schema-v3 tracking uses explicit unknowns, both
-daily reports and the unified portal exist, SQLite matches the analysis hash,
-and `./bin/diet verify DATE` prints `VERIFY=passed`.
+to nutrient totals, all unrelated workspace copies are represented by purged
+manifest tombstones and the durable media audit, duplicates were not double
+counted, each food has source-aware range estimates, schema-v3 tracking uses
+explicit unknowns, both daily reports and the unified portal exist, SQLite
+matches the analysis hash, and `./bin/diet verify DATE` prints `VERIFY=passed`.

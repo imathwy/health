@@ -6,6 +6,7 @@ from pathlib import Path
 
 from healthlog.errors import PipelineError
 from healthlog.media import manifest_preview_path
+from healthlog.media_retention import manifest_source_path, retention_preview_path
 from healthlog.presentation import audit_static_html
 from healthlog.workspace import (
     PersonalProfilePaths,
@@ -45,6 +46,7 @@ class LayerBoundaryTests(unittest.TestCase):
             "commands",
             "fdc",
             "media",
+            "media_retention",
             "presentation",
             "profile_presentation",
             "profile_workflow",
@@ -70,6 +72,7 @@ class LayerBoundaryTests(unittest.TestCase):
 
         self.assertIsInstance(paths, WorkspacePaths)
         self.assertEqual(paths.analysis.name, "analysis.json")
+        self.assertEqual(paths.media_audit.name, "media-audit.json")
         self.assertEqual(paths.report_md.suffix, ".md")
         self.assertEqual(paths.report_html.suffix, ".html")
         self.assertNotEqual(paths.runtime_root, paths.site_root)
@@ -105,6 +108,21 @@ class LayerBoundaryTests(unittest.TestCase):
 
         with self.assertRaisesRegex(PipelineError, "越过目录边界"):
             manifest_preview_path(asset, manifest, paths)
+
+    def test_rejects_media_purge_path_outside_daily_record(self) -> None:
+        paths = paths_for(date(2026, 1, 2), profile())
+        asset = {"file": "outside.jpg", "relative_path": "../../outside.jpg"}
+
+        with self.assertRaisesRegex(PipelineError, "越过当日记录目录"):
+            manifest_source_path(asset, paths)
+
+    def test_rejects_media_purge_preview_outside_dated_assets(self) -> None:
+        paths = paths_for(date(2026, 1, 2), profile())
+        manifest = {"schema_version": 4}
+        asset = {"file": "outside.jpg", "preview_path": "site/index.html"}
+
+        with self.assertRaisesRegex(PipelineError, "当日预览目录之外"):
+            retention_preview_path(asset, manifest, paths)
 
     def test_static_html_audit_rejects_external_loaded_assets(self) -> None:
         with tempfile.TemporaryDirectory() as raw_directory:

@@ -39,6 +39,14 @@ from .media import (
     run_shortcut,
     sha256_file,
 )
+from .media_retention import (
+    STORAGE_PURGED_UNRELATED,
+    STORAGE_RETAINED,
+    load_media_audit,
+    manifest_source_path,
+    purge_unrelated_workspace_copies,
+    reconcile_known_unrelated_exports,
+)
 from .presentation import (
     audit_static_html,
     render_html,
@@ -92,6 +100,9 @@ def prepare(args: argparse.Namespace) -> int:
     paths.record_dir.mkdir(parents=True, exist_ok=True)
     paths.runtime_day_dir.mkdir(parents=True, exist_ok=True)
     paths.site_day_dir.mkdir(parents=True, exist_ok=True)
+    existing = load_json(paths.analysis) if paths.analysis.is_file() else None
+    previous_manifest = load_json(paths.manifest) if paths.manifest.is_file() else None
+    media_audit = load_media_audit(paths.media_audit, target)
 
     shortcut_name = args.shortcut or profile["pipeline"]["shortcut_name"]
     if args.skip_export:
@@ -111,7 +122,13 @@ def prepare(args: argparse.Namespace) -> int:
             paths.record_dir,
         )
 
-    manifest = build_manifest(target, paths, shortcut_result)
+    manifest = reconcile_known_unrelated_exports(
+        paths,
+        build_manifest(target, paths, shortcut_result),
+        media_audit,
+        existing,
+        previous_manifest,
+    )
     write_json(paths.manifest, manifest)
     template = analysis_template(
         target,
@@ -125,14 +142,15 @@ def prepare(args: argparse.Namespace) -> int:
         analysis_state = "created"
     else:
         analysis_state = "preserved"
-        existing = load_json(paths.analysis)
         manifest_files = {asset["file"] for asset in manifest["assets"]}
         analysis_files = {
             row.get("file")
-            for row in existing.get("images", [])
+            for row in (existing or {}).get("images", [])
             if isinstance(row, dict)
         }
-        if manifest_files != analysis_files:
+        if manifest_files != analysis_files or any(
+            asset.get("review_required") is True for asset in manifest["assets"]
+        ):
             analysis_state = "preserved-needs-sync"
 
     print(f"DATE={target.isoformat()}")
@@ -140,11 +158,17 @@ def prepare(args: argparse.Namespace) -> int:
     print(f"RUNTIME_DIR={paths.runtime_day_dir}")
     print(f"SITE_DIR={paths.site_day_dir}")
     print(f"ASSETS={manifest['asset_count']}")
+    print(f"RETAINED_ASSETS={manifest['retained_asset_count']}")
+    print(f"PURGED_UNRELATED={manifest['purged_asset_count']}")
+    print(
+        "REEXPORTED_UNRELATED_PURGED="
+        f"{manifest.get('known_unrelated_reexports_purged', 0)}"
+    )
     print(f"PREVIEWS={manifest['preview_count']}")
     print(f"MANIFEST={paths.manifest}")
     print(f"ANALYSIS={paths.analysis}")
     print(f"ANALYSIS_STATE={analysis_state}")
-    if manifest["preview_count"] != manifest["asset_count"]:
+    if manifest["preview_count"] != manifest["retained_asset_count"]:
         print("WARNING=部分媒体没有预览；查看 manifest.json 的 preview_error")
     return 0
 
@@ -189,6 +213,13 @@ def render(args: argparse.Namespace) -> int:
     if errors:
         raise PipelineError("分析数据未通过校验：\n- " + "\n- ".join(errors))
 
+    media_audit = load_media_audit(paths.media_audit, target)
+    manifest, media_audit, purge_stats = purge_unrelated_workspace_copies(
+        paths, manifest, analysis, media_audit
+    )
+    write_json(paths.media_audit, media_audit)
+    write_json(paths.manifest, manifest)
+
     totals = sum_nutrition(analysis)
     day_type = analysis["day_context"]["day_type"]
     comparisons = comparison_rows(totals, profile, day_type)
@@ -223,6 +254,10 @@ def render(args: argparse.Namespace) -> int:
     print(f"DASHBOARD={dashboard_path}")
     print(f"DATABASE={db_path}")
     print("DATABASE_STATUS=synced")
+    print(f"PURGED_UNRELATED={purge_stats['purged_assets']}")
+    print(f"DELETED_WORKSPACE_COPIES={purge_stats['deleted_sources']}")
+    print(f"DELETED_DERIVED_PREVIEWS={purge_stats['deleted_previews']}")
+    print("APPLE_PHOTOS_ORIGINALS=untouched")
     print(f"TOTAL_KCAL={display_range(totals['kcal'], 'kcal')}")
     print(f"TOTAL_PROTEIN={display_range(totals['protein_g'], 'g')}")
     for warning in warnings:
@@ -235,11 +270,49 @@ def render(args: argparse.Namespace) -> int:
 def _verify_media(
     paths: WorkspacePaths,
     manifest: dict[str, Any],
+    analysis: dict[str, Any],
+    media_audit: dict[str, Any],
     errors: list[str],
     warnings: list[str],
 ) -> None:
+    classifications = {
+        row.get("file"): row.get("classification")
+        for row in analysis.get("images", [])
+        if isinstance(row, dict)
+    }
+    audit_keys = {
+        (row.get("file"), row.get("sha256"))
+        for row in media_audit.get("purged_assets", [])
+        if isinstance(row, dict)
+    }
+    manifest_files: set[str] = set()
     for asset in manifest.get("assets", []):
-        source = paths.record_dir / asset["relative_path"]
+        filename = asset.get("file")
+        if not isinstance(filename, str):
+            errors.append("媒体清单含无效文件名")
+            continue
+        manifest_files.add(filename)
+        try:
+            source = manifest_source_path(asset, paths)
+        except PipelineError as exc:
+            errors.append(str(exc))
+            continue
+        storage_state = asset.get("storage_state", STORAGE_RETAINED)
+        if storage_state == STORAGE_PURGED_UNRELATED:
+            if classifications.get(filename) != "unrelated":
+                errors.append(f"已清理媒体的分类不是 unrelated：{filename}")
+            if source.exists():
+                errors.append(f"无关媒体副本仍留在 health 目录：{filename}")
+            if asset.get("preview_path"):
+                errors.append(f"已清理媒体仍记录预览路径：{filename}")
+            if (filename, asset.get("sha256")) not in audit_keys:
+                errors.append(f"已清理媒体缺少哈希审计：{filename}")
+            continue
+        if storage_state != STORAGE_RETAINED:
+            errors.append(f"媒体 storage_state 无效：{filename}: {storage_state}")
+            continue
+        if classifications.get(filename) == "unrelated":
+            errors.append(f"无关媒体尚未清理；重新运行 diet render：{filename}")
         if not source.exists():
             errors.append(f"源媒体缺失：{source.name}")
             continue
@@ -257,6 +330,13 @@ def _verify_media(
                 errors.append(f"预览缺失：{source.name}")
         else:
             warnings.append(f"没有预览：{source.name}")
+    extra_media = sorted(
+        path.name
+        for path in media_files(paths.record_dir)
+        if path.name not in manifest_files
+    )
+    if extra_media:
+        errors.append(f"当日目录含未登记媒体：{', '.join(extra_media)}")
 
 
 def _verify_reports(target: date, paths: WorkspacePaths, errors: list[str]) -> None:
@@ -359,7 +439,8 @@ def verify(args: argparse.Namespace) -> int:
     target = resolve_date(args.date)
     paths, manifest, analysis = load_analysis_bundle(target, profile)
     errors, warnings = validate_analysis(analysis, manifest)
-    _verify_media(paths, manifest, errors, warnings)
+    media_audit = load_media_audit(paths.media_audit, target)
+    _verify_media(paths, manifest, analysis, media_audit, errors, warnings)
     _verify_reports(target, paths, errors)
     db_path = _verify_database(profile, target, paths, analysis, errors)
     _verify_html(paths, manifest, errors, warnings)
@@ -376,6 +457,8 @@ def verify(args: argparse.Namespace) -> int:
     print("VERIFY=passed")
     print(f"DATE={target.isoformat()}")
     print(f"ASSETS={manifest.get('asset_count', 0)}")
+    print(f"RETAINED_ASSETS={manifest.get('retained_asset_count', 0)}")
+    print(f"PURGED_UNRELATED={manifest.get('purged_asset_count', 0)}")
     print(f"PREVIEWS={manifest.get('preview_count', 0)}")
     print(f"REPORT_MD={paths.report_md}")
     print(f"REPORT_HTML={paths.report_html}")
@@ -405,6 +488,15 @@ def status(args: argparse.Namespace) -> int:
         f"{paths.site_day_dir}"
     )
     print(f"MEDIA={len(media)}")
+    if paths.media_audit.is_file():
+        media_audit = load_media_audit(paths.media_audit, target)
+        print(f"PURGED_UNRELATED={len(media_audit.get('purged_assets', []))}")
+    else:
+        print("PURGED_UNRELATED=0")
+    print(
+        f"MEDIA_AUDIT={'ready' if paths.media_audit.exists() else 'missing'}:"
+        f"{paths.media_audit}"
+    )
     print(f"MANIFEST={'ready' if paths.manifest.exists() else 'missing'}")
     print(f"ANALYSIS={'ready' if paths.analysis.exists() else 'missing'}")
     print(f"REPORT_MD={'ready' if paths.report_md.exists() else 'missing'}")
@@ -472,17 +564,27 @@ def rebuild_database(args: argparse.Namespace) -> int:
             target = datetime.strptime(day_dir.name, "%Y%m%d").date()
             paths = paths_for(target, profile)
             analysis = load_json(paths.analysis)
-            manifest = build_manifest(
-                target,
+            media_audit = load_media_audit(paths.media_audit, target)
+            previous_manifest = (
+                load_json(paths.manifest) if paths.manifest.is_file() else None
+            )
+            manifest = reconcile_known_unrelated_exports(
                 paths,
-                {
-                    "name": profile["pipeline"]["shortcut_name"],
-                    "skipped": True,
-                    "reason": "rebuild-db",
-                    "stdout": "",
-                    "stderr": "",
-                    "fields": {},
-                },
+                build_manifest(
+                    target,
+                    paths,
+                    {
+                        "name": profile["pipeline"]["shortcut_name"],
+                        "skipped": True,
+                        "reason": "rebuild-db",
+                        "stdout": "",
+                        "stderr": "",
+                        "fields": {},
+                    },
+                ),
+                media_audit,
+                analysis,
+                previous_manifest,
             )
             write_json(paths.manifest, manifest)
             write_json(

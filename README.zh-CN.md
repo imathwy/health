@@ -7,13 +7,15 @@ Local HealthLog 是一套 macOS 本地优先的健康与饮食记录流水线：
 ```mermaid
 flowchart LR
     A[日期] --> B[Apple Photos Shortcut]
-    B --> C[本地原图]
+    B --> C[临时本地导出候选]
     C --> D[runtime 中的清单]
     C --> P[site 中的网页预览]
     D --> E[Codex 逐图检查]
     P --> E
     E --> S[筛选食物相关照片]
-    S --> N[重建餐次与营养估算]
+    S --> R[保留已摄入 / 存疑食物照片]
+    S --> Q[哈希审计并清理无关工作区副本]
+    R --> N[重建餐次与营养估算]
     X[私有个人档案与病历索引] --> N
     U[可选 USDA 文本查询] --> N
     N --> F[analysis.json v3]
@@ -23,9 +25,9 @@ flowchart LR
     H --> I[7 / 30 天汇总]
 ```
 
-核心约束：原图不修改，私密数据不进 Git；照片只证明“可能吃了什么和多少”，营养组成来源单独记录；所有估算保留下界和上界，不把区间中点伪装成实测值。
+核心约束：Apple Photos 原件不修改，私密数据不进 Git；照片只证明“可能吃了什么和多少”，营养组成来源单独记录；所有估算保留下界和上界，不把区间中点伪装成实测值。
 
-营养分析前会逐张检查当天导出的全部照片。`consumed_food` 与 `possible_food` 组成食物相关筛选集，但只有 `consumed_food` 可以关联餐次并进入营养合计。本地档案开启“食物照片表示有摄入”后，只有包装的食物或饮料照片也算确认摄入；`possible_food` 等待确认，`unrelated` 仅保留在默认折叠的审计区，不干扰饮食照片展示。
+营养分析前会逐张检查当天导出的全部照片。`consumed_food` 与 `possible_food` 组成食物相关筛选集，但只有 `consumed_food` 可以关联餐次并进入营养合计。本地档案开启“食物照片表示有摄入”后，只有包装的食物或饮料照片也算确认摄入；`possible_food` 等待确认并继续保留。分类校验通过后，`unrelated` 的 health 工作区导出副本和派生预览会被删除，只留下分类与哈希审计；流程不会请求 Apple Photos 删除任何原件。
 
 ## Clone 与初始化
 
@@ -94,7 +96,7 @@ diet status yesterday
 diet dashboard
 ```
 
-`diet yesterday` 是 `diet prepare yesterday` 的缩写。Shortcut 只能直接写入 `data/daily/YYYYMMDD/`；CLI 会拒绝根目录别名或符号链接返回的路径。`render` 将 Markdown 写入 `runtime/`、HTML 与网页图片写入 `site/`，并同步统一门户和 SQLite；`verify` 会检查原图哈希、预览、schema、静态链接、目录边界、报告、门户和数据库哈希。
+`diet yesterday` 是 `diet prepare yesterday` 的缩写。Shortcut 只能直接写入 `data/daily/YYYYMMDD/`；CLI 会拒绝根目录别名或符号链接返回的路径。`render` 会在校验分类后清理无关工作区副本，将 Markdown 写入 `runtime/`、HTML 与食物相关网页图片写入 `site/`，并同步统一门户和 SQLite；`verify` 会检查保留媒体哈希、已清理媒体的墓碑与审计哈希、预览、schema、静态链接、目录边界、报告、门户和数据库哈希。详见[媒体保留与删除边界](docs/media-retention.md)。
 
 本地入口是 `site/index.html`。它按“总览 → 个人档案 / 健康计划 / 每日饮食 / 长期趋势 → 详细报告”分层，并在一个页面内切换个人简介与病历、健康与补剂、最近一天、全部日期、7 天和 30 天报告。所有浏览器页面及其专用图片集中在 `site/`；页面不加载外部脚本、字体或图片，“单独打开”可脱离门户查看当前报告。
 
@@ -158,7 +160,7 @@ diet db-status
 │   ├── health_profile.json      # 私有运行配置、忽略
 │   └── reminder.local.json      # 私有每日提醒偏好、忽略
 ├── data/                        # 长期私有记录、忽略
-│   ├── daily/YYYYMMDD/          # 原始媒体 + canonical analysis.json
+│   ├── daily/YYYYMMDD/          # 食物相关媒体 + analysis.json + media-audit.json
 │   ├── profiles/<id>/
 │   │   ├── profile.json         # 个人与健康上下文主档案
 │   │   └── medical/             # index.json + 原样 files/
@@ -188,6 +190,7 @@ diet db-status
 │   ├── reminder.py              # 每日提醒配置模型
 │   ├── workspace.py             # 配置、路径边界与原子文件 I/O
 │   ├── media.py                 # Shortcut、媒体清单与预览
+│   ├── media_retention.py       # 哈希审计与无关副本边界清理
 │   ├── presentation.py          # Markdown、HTML 与本地门户
 │   ├── profile_presentation.py  # 私有个人档案 HTML 适配器
 │   ├── store.py                 # 可重建 SQLite 适配器

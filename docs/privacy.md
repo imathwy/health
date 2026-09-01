@@ -35,6 +35,13 @@ deliberately generic and contains no condition, medicine, measurement, or
 medical-record detail. A custom message is a user's explicit local choice and
 must still remain outside Git.
 
+Food screening retains `consumed_food` and `possible_food` exports locally.
+After validation, `unrelated` copies and their browser previews are removed from
+the health workspace; `media-audit.json` retains only private metadata and a
+SHA-256. The cleanup code is bounded to the configured daily record and site
+preview roots and never issues a delete request to Apple Photos. See
+[media retention](media-retention.md).
+
 If private data is ever committed, removing it in a later commit is insufficient because it remains in history. Stop before pushing, remove it from history with an appropriate history-rewrite tool, rotate any exposed credentials, and verify a fresh clone before publishing.
 
 ## Optional external nutrition lookup

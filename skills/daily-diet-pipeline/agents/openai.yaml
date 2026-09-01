@@ -1,6 +1,6 @@
 interface:
   display_name: "每日饮食照片流水线"
   short_description: "个人档案、每日提醒、照片饮食与本地趋势"
-  default_prompt: "Use $daily-diet-pipeline to read the active private personal profile and medical index, manage a local daily reminder when requested, inspect every photo from yesterday, screen food-related assets before reconstructing meals, preserve source-aware nutrition and health observations with explicit missingness, sync the local SQLite index, and generate verified local reports."
+  default_prompt: "Use $daily-diet-pipeline to read the active private personal profile and medical index, manage a local daily reminder when requested, inspect every photo from yesterday, screen food-related assets before reconstructing meals, purge only validated unrelated copies from the health workspace while leaving Apple Photos untouched, preserve source-aware nutrition and health observations with explicit missingness, sync the local SQLite index, and generate verified local reports."
 policy:
   allow_implicit_invocation: true

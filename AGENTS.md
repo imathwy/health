@@ -13,8 +13,9 @@ This repository separates reusable source from private health data. Never transm
   LaunchAgent lives outside the repository under `~/Library/LaunchAgents/`.
 - Durable private records: `data/`. The canonical personal context is
   `data/profiles/<profile_id>/profile.json`; its structured medical index and
-  raw records live under the same profile. Original food media and
-  `analysis.json` stay in `data/daily/`. Back up this layer.
+  raw records live under the same profile. Reviewed food-related exports,
+  `analysis.json`, and the hash-only `media-audit.json` stay in `data/daily/`.
+  Back up this layer. Unrelated exported copies are not retained.
 - Rebuildable private runtime: `runtime/`. Manifests, Markdown/JSON reports,
   SQLite, and caches belong here; HTML does not.
 - Private web display: `site/`. All browser-facing HTML and display-only images
@@ -42,8 +43,9 @@ This repository separates reusable source from private health data. Never transm
 - `analysis.py`, `nutrition.py`, `tracking.py`, `tracking_summary.py`,
   `personal_profile.py`, and `summary.py` are the domain layer. They must
   not import CLI, filesystem, media, presentation, network, or SQLite adapters.
-- `workspace.py`, `media.py`, `presentation.py`, `profile_presentation.py`,
-  `store.py`, and `fdc.py` own configuration/filesystem, Photos/preview, static
+- `workspace.py`, `media.py`, `media_retention.py`, `presentation.py`,
+  `profile_presentation.py`, `store.py`, and `fdc.py` own
+  configuration/filesystem, Photos/preview, unrelated-copy retention, static
   display, personal-profile display, SQLite, and USDA boundaries respectively.
 - Preserve these import rules in `tests/test_boundaries.py`. Prefer a focused
   module or immutable value object over adding another responsibility to an
@@ -66,16 +68,23 @@ When the user asks to analyze food for today, yesterday, or a date:
 7. Reconstruct meals from confirmed consumed-food photos, timestamps, and visual context. Pair before/after photos and count repeated angles or Live Photo pairs once.
 8. Write schema-v3 `analysis.json` with range estimates for calories, protein, carbohydrate, fat, fiber, and sodium. Every item also records `evidence.portion_method` and `evidence.nutrition_source`; every meal has `tracking_tags`; non-photo observations live in the top-level `tracking` block. Optional and tracking values remain null/absent when unknown rather than being filled with zero.
 9. Prefer a visible package label, then a verified matching single-food database record, then a wide recipe estimate. Do not map a mixed cafeteria plate to one USDA item or invent a source after estimating from general knowledge.
-10. Run `./bin/diet render YYYY-MM-DD` and `./bin/diet verify YYYY-MM-DD`. Rendering also syncs the private SQLite index. Fix errors until verification passes.
+10. Run `./bin/diet render YYYY-MM-DD` and `./bin/diet verify YYYY-MM-DD`.
+    After validation, rendering removes only `unrelated` export copies and
+    derived previews from the health workspace, writes their hashes to
+    `media-audit.json`, and syncs SQLite. It never deletes from Apple Photos.
+    `possible_food` remains retained. Fix errors until verification passes.
 11. Run `./bin/diet dashboard` when the unified portal is missing or stale.
 12. Return links to `site/index.html`, the dated runtime Markdown and site HTML,
     plus the material uncertainty.
 
 Use targets and health guardrails from the canonical durable personal profile.
 Do not infer diagnoses or add supplements from one day of photos. Never delete
-or alter original media. Do not use `--reset-analysis` on meaningful work unless
-it has first been preserved. Use `--skip-export` only when the user explicitly
-wants existing files analyzed or when testing downstream code.
+or alter Apple Photos originals, retained food-related exports, or medical
+records. The user has authorized deletion only of health-workspace copies that
+have passed validation as `unrelated`; keep a hash audit and never purge
+`possible_food`. Do not use `--reset-analysis` on meaningful work unless it has
+first been preserved. Use `--skip-export` only when the user explicitly wants
+existing files analyzed or when testing downstream code.
 
 ## Personal profile and medical history
 

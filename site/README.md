@@ -8,7 +8,8 @@ information.
 - `profile/`: validated personal status and medical-history summary; raw medical
   files are never linked or copied here
 - `health/`: the health and supplement page plus its display-only assets
-- `daily/YYYYMMDD/`: rendered daily HTML and browser-ready JPEG previews
+- `daily/YYYYMMDD/`: rendered daily HTML and browser-ready JPEG previews;
+  previews of validated `unrelated` assets are removed during `diet render`
 - `nutrition/`: rendered 7/30-day HTML summaries
 
 The canonical records remain in `data/`; machine-oriented manifests, Markdown,

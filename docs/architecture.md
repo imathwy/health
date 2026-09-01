@@ -9,8 +9,9 @@ The repository has six explicit boundaries:
    Apple Shortcut. Python does not request Photos access; the Shortcut owns that
    permission and writes directly into `data/daily/`. An optional user
    LaunchAgent invokes only the reminder command and owns no health records.
-3. **Durable private records** — `data/daily/YYYYMMDD/` contains unmodified media
-   and the human-reviewed `analysis.json`.
+3. **Durable private records** — `data/daily/YYYYMMDD/` contains reviewed
+   food-related exports, the human-reviewed `analysis.json`, and a hash-only
+   `media-audit.json` for unrelated workspace copies removed after screening.
    `data/profiles/<profile_id>/profile.json` is the personal source of truth;
    its `medical/index.json` describes untouched originals under
    `medical/files/`. `data/supplements/` holds the remaining user-owned health
@@ -32,7 +33,7 @@ The repository has six explicit boundaries:
 | Entry adapter | `cli`, `__main__` | Parse arguments, route commands, translate expected failures to exit codes |
 | Application | `commands`, `profile_workflow`, `reminder_workflow` | Orchestrate dated, personal-profile, and local reminder workflows; compose ports/adapters |
 | Domain | `analysis`, `nutrition`, `tracking`, `tracking_summary`, `personal_profile`, `reminder`, `summary` | Analysis, personal/medical, and reminder schemas; nutrient vocabulary, interval math, validation, target comparison, and summaries |
-| External adapters | `workspace`, `media`, `presentation`, `profile_presentation`, `store`, `fdc` | Filesystem/config, Shortcuts and previews, HTML, SQLite, USDA HTTP |
+| External adapters | `workspace`, `media`, `media_retention`, `presentation`, `profile_presentation`, `store`, `fdc` | Filesystem/config, Shortcuts and previews, bounded media retention, HTML, SQLite, USDA HTTP |
 | Foundation | `errors` | Stable application error shared by inward and outward layers |
 
 ```mermaid
@@ -48,6 +49,7 @@ flowchart TD
     APP --> SUMMARY[summary]
     APP --> WORKSPACE[workspace]
     APP --> MEDIA[media]
+    APP --> RETENTION[media_retention]
     APP --> PRESENTATION[presentation]
     PROFILEAPP --> PROFILEVIEW[profile_presentation]
     PROFILEAPP --> PRESENTATION
@@ -62,6 +64,8 @@ flowchart TD
     STORE --> NUTRITION
     FDC --> NUTRITION
     MEDIA --> WORKSPACE
+    RETENTION --> MEDIA
+    RETENTION --> WORKSPACE
     PRESENTATION --> ANALYSIS
     PRESENTATION --> MEDIA
     PRESENTATION --> WORKSPACE
@@ -96,13 +100,16 @@ portable configuration.
 ```mermaid
 flowchart LR
     A[Date] --> B[Apple Shortcut]
-    B --> C[data/daily: original media]
+    B --> C[data/daily: temporary export candidates]
     C --> D[runtime/daily: manifest and template]
     C --> P[site/daily: browser previews]
     D --> E[Codex review]
     P --> E
     E --> S[Food relevance screening]
-    S --> N[Meal reconstruction and nutrition]
+    S --> R[Retain consumed and possible food]
+    S --> X[Audit hash and purge unrelated workspace copy]
+    R --> N[Meal reconstruction and nutrition]
+    X --> AUDIT[data/daily: media-audit.json]
     K[data/profiles: personal context] --> N
     U[Optional USDA text or ID query] --> N
     N --> F[data/daily: analysis.json v3]
@@ -135,6 +142,16 @@ The Shortcut's returned `EXPORT_DIR` must exactly match the configured dated
 record directory. The CLI deliberately rejects root aliases such as `daily/`,
 even if a symlink would resolve to the same target. This keeps ownership visible
 and prevents compatibility paths from becoming permanent API surface.
+
+The Shortcut must first export candidates so every asset can be inspected.
+After `analysis.json` passes validation, `media_retention.py` resolves each `unrelated`
+asset strictly inside that dated record root, verifies its size and SHA-256,
+deletes the workspace copy and its site preview, and replaces it in the runtime
+manifest with a tombstone. The durable `media-audit.json` keeps only safe
+metadata, so runtime can be rebuilt and an identical later export can be removed
+by hash. `possible_food` is never purged. This adapter does not invoke Photos
+when deleting; the Photos library remains the recovery source if a
+classification is later corrected.
 
 `bin/diet` resolves the repository from its own location, so it works both from
 the clone and through a symlink in `~/.local/bin`. `HEALTHLOG_ROOT` may override

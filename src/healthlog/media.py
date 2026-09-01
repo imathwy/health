@@ -18,6 +18,7 @@ from .workspace import ROOT, WorkspacePaths, relative_private_path
 
 
 PREVIEW_VERSION = 2
+MANIFEST_SCHEMA_VERSION = 4
 IMAGE_EXTENSIONS = {
     ".avif",
     ".heic",
@@ -36,7 +37,7 @@ MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
 def manifest_preview_path(
     asset: dict[str, Any], manifest: dict[str, Any], paths: WorkspacePaths
 ) -> Path | None:
-    """Resolve both schema-v3 site paths and legacy runtime-relative previews."""
+    """Resolve schema-v3+ site paths and legacy runtime-relative previews."""
     raw_path = asset.get("preview_path")
     if not isinstance(raw_path, str) or not raw_path:
         return None
@@ -306,11 +307,12 @@ def build_manifest(
                 "paired_files": [
                     name for name in stems[source.stem.lower()] if name != source.name
                 ],
+                "storage_state": "retained",
             }
         )
 
     return {
-        "schema_version": 3,
+        "schema_version": MANIFEST_SCHEMA_VERSION,
         "date": target.isoformat(),
         "generated_at": datetime.now().astimezone().isoformat(),
         "root": str(ROOT),
@@ -319,6 +321,9 @@ def build_manifest(
         "site_directory": str(paths.site_day_dir),
         "shortcut": shortcut_result,
         "asset_count": len(assets),
+        "retained_asset_count": len(assets),
+        "purged_asset_count": 0,
+        "known_unrelated_reexports_purged": 0,
         "preview_count": sum(bool(asset["preview_path"]) for asset in assets),
         "assets": assets,
     }

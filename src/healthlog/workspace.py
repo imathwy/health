@@ -25,6 +25,7 @@ REMINDER_SETTINGS_PATH = ROOT / "config" / "reminder.local.json"
 PIPELINE_DIR_NAME = "pipeline"
 MANIFEST_NAME = "manifest.json"
 ANALYSIS_NAME = "analysis.json"
+MEDIA_AUDIT_NAME = "media-audit.json"
 REPORT_MD_NAME = "README.md"
 REPORT_HTML_NAME = "index.html"
 
@@ -46,6 +47,7 @@ class WorkspacePaths:
     manifest: Path
     template: Path
     analysis: Path
+    media_audit: Path
     report_md: Path
     report_html: Path
     daily_index_md: Path
@@ -303,6 +305,7 @@ def paths_for(target: date, profile: dict[str, Any]) -> WorkspacePaths:
         manifest=pipeline_dir / MANIFEST_NAME,
         template=pipeline_dir / "analysis.template.json",
         analysis=record_dir / ANALYSIS_NAME,
+        media_audit=record_dir / MEDIA_AUDIT_NAME,
         report_md=runtime_day_dir / REPORT_MD_NAME,
         report_html=site_day_dir / REPORT_HTML_NAME,
         daily_index_md=daily_runtime_root / REPORT_MD_NAME,
